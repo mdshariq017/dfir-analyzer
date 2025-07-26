@@ -1,53 +1,69 @@
-import { useState } from 'react';
-import axios from 'axios';
-import './App.css';
+import { useState } from "react";
+import axios from "axios";
+import "./App.css";
 
 function App() {
   const [file, setFile] = useState(null);
-  const [message, setMessage] = useState('');
-  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [error, setError] = useState("");
 
   const handleFileChange = (e) => {
     setFile(e.target.files[0]);
-    setMessage('');
+    setUploadResult(null);
+    setError("");
+  };
+
+  const getRiskColor = (score) => {
+    if (score <= 40) return "green";
+    if (score <= 70) return "orange";
+    return "red";
   };
 
   const handleUpload = async () => {
     if (!file) {
-      setMessage('❗ Please select a file first.');
+      setError("Please select a file first.");
       return;
     }
 
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
 
     try {
-      setUploading(true);
-      const response = await axios.post('http://127.0.0.1:8000/upload', formData, {
+      const response = await axios.post("http://127.0.0.1:8000/upload", formData, {
         headers: {
-          'Content-Type': 'multipart/form-data',
+          "Content-Type": "multipart/form-data",
         },
       });
 
-      setMessage(`✅ Success: ${response.data.message || 'File uploaded successfully.'}`);
-    } catch (error) {
-      setMessage(`❌ Error: ${error.response?.data?.detail || error.message}`);
-    } finally {
-      setUploading(false);
+      setUploadResult(response.data);
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.detail || "Upload failed");
     }
   };
 
   return (
-    <div className="upload-container">
+    <div className="app">
       <h1>DFIR File Upload</h1>
 
       <input type="file" onChange={handleFileChange} />
-      
-      <button onClick={handleUpload} disabled={uploading}>
-        {uploading ? 'Uploading...' : 'Upload'}
-      </button>
+      <button onClick={handleUpload}>Upload</button>
 
-      {message && <p>{message}</p>}
+      {error && <p style={{ color: "red" }}>{error}</p>}
+
+      {uploadResult && (
+        <div className="result-card">
+          <p><strong>Original Filename:</strong> {uploadResult.original_filename}</p>
+          <p><strong>Stored As:</strong> {uploadResult.stored_as}</p>
+          <p>
+            <strong>Risk Score:</strong>{" "}
+            <span style={{ color: getRiskColor(uploadResult.score), fontWeight: "bold" }}>
+              {uploadResult.score}
+            </span>
+          </p>
+          <p>{uploadResult.message}</p>
+        </div>
+      )}
     </div>
   );
 }

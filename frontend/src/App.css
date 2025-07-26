@@ -40,3 +40,26 @@
 .read-the-docs {
   color: #888;
 }
+.app {
+  font-family: Arial, sans-serif;
+  padding: 2rem;
+  max-width: 500px;
+  margin: auto;
+}
+
+input[type="file"] {
+  margin-bottom: 1rem;
+}
+
+button {
+  padding: 0.5rem 1rem;
+  margin-bottom: 1rem;
+  cursor: pointer;
+}
+
+.result-card {
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 1rem;
+  background-color: #f9f9f9;
+}
