@@ -104,7 +104,7 @@ function App() {
 
       <div className={`upload-container ${dragActive ? 'drag-active' : ''}`}>
         <div 
-          className="file-input-wrapper"
+          className={`file-input-wrapper ${file ? 'has-file' : ''}`}
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
           onDragOver={handleDrag}
@@ -117,18 +117,27 @@ function App() {
             id="file-input"
             accept="*/*"
           />
-          <label htmlFor="file-input" className="file-input">
+          <label htmlFor="file-input">
             {file ? (
               <div>
-                <strong>Selected File:</strong> {file.name}
-                <br />
-                <small>Size: {formatFileSize(file.size)}</small>
+                <div style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>
+                  📄 <strong>{file.name}</strong>
+                </div>
+                <div style={{ color: '#a0a0a0', fontSize: '0.9rem' }}>
+                  Size: {formatFileSize(file.size)}
+                </div>
+                <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', opacity: 0.7 }}>
+                  Click to change file or drag a new one
+                </div>
               </div>
             ) : (
               <div>
-                <strong>📁 Choose a file</strong> or drag and drop here
-                <br />
-                <small>Supports all file types for forensic analysis</small>
+                <div style={{ fontSize: '1.2rem', marginBottom: '0.5rem' }}>
+                  📁 <strong>Choose a file</strong> or drag and drop here
+                </div>
+                <div style={{ color: '#a0a0a0', fontSize: '0.9rem' }}>
+                  Supports all file types for forensic analysis
+                </div>
               </div>
             )}
           </label>
