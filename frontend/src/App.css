@@ -20,6 +20,13 @@ body {
   min-height: 100vh;
 }
 
+/* When the right panel is visible, allow the canvas to use the full width */
+.app-wide {
+  max-width: 100%;
+  padding-left: 3rem;
+  padding-right: 3rem;
+}
+
 /* Top bar */
 .topbar {
   display: flex;
@@ -32,6 +39,21 @@ body {
   color: #d6d6e7;
   font-weight: 500;
   opacity: 0.9;
+}
+
+.welcome {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(102,126,234,0.5), rgba(118,75,162,0.5));
+  border: 2px solid rgba(255,255,255,0.18);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.25);
 }
 
 /* Header styles */
@@ -475,6 +497,175 @@ body {
 ::-webkit-scrollbar {
   width: 8px;
 }
+
+/* New dashboard viewport and right panel */
+.dashboard-viewport {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(720px, 1fr) 40vw;
+  align-items: center;
+  justify-items: center;
+  min-height: calc(100vh - 120px);
+  transition: transform 0.5s ease-in-out;
+}
+
+.dashboard-viewport.centered .dashboard-left {
+  transform: translateX(0);
+}
+
+
+.dashboard-viewport.with-panel .dashboard-left {
+  transform: translateX(-5%);
+}
+
+.dashboard-left {
+  width: 100%;
+  max-width: 1200px;
+  transition: transform 0.5s ease-in-out;
+}
+
+.right-panel {
+  height: 100%;
+  background: rgba(255,255,255,0.06);
+  border-left: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(8px);
+  padding: 1.25rem 1rem;
+  opacity: 0;
+  transform: translateX(20px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  overflow: auto;
+}
+
+.right-panel.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* Off-canvas peek state shown before upload to balance the layout */
+.right-panel.peek {
+  opacity: 0.6;
+  transform: translateX(10px);
+  position: relative;
+}
+
+.right-panel.peek::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(60% 40% at 30% 20%, rgba(118,75,162,0.08), transparent),
+              radial-gradient(60% 40% at 70% 80%, rgba(102,126,234,0.08), transparent);
+  pointer-events: none;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.panel-title {
+  font-weight: 800;
+  color: #d6d6e7;
+}
+
+.panel-section {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.panel-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.panel-item:last-child {
+  border-bottom: none;
+}
+
+.panel-placeholder {
+  color: #a0a0b4;
+  opacity: 0.9;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.recommendations {
+  margin: 0;
+  padding-left: 1rem;
+  line-height: 1.7;
+  color: #d6d6e7;
+}
+
+.recommendation-text {
+  color: #d6d6e7;
+  line-height: 1.7;
+}
+
+.hash-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.code-select {
+  font-family: monospace;
+  user-select: text;
+  word-break: break-all;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+}
+
+.copy-btn {
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.06);
+  color: #e7e7f4;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-btn:hover {
+  transform: translateY(-1px);
+  background: rgba(255,255,255,0.1);
+}
+
+.score-bubble {
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.score-low { background: rgba(34, 197, 94, 0.2); color: #22c55e; border: 1px solid rgba(34, 197, 94, 0.3); }
+.score-medium { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.35); }
+.score-high { background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.35); }
+
+@media (max-width: 1024px) {
+  .dashboard-viewport.with-panel {
+    grid-template-columns: 1fr;
+  }
+  .right-panel {
+    position: fixed;
+    right: 0;
+    top: 80px;
+    bottom: 0;
+    width: 40vw;
+    min-width: 320px;
+    box-shadow: -20px 0 40px rgba(0,0,0,0.4);
+  }
+}
+
 
 ::-webkit-scrollbar-track {
   background: rgba(255, 255, 255, 0.1);
