@@ -7,8 +7,10 @@ import logging
 
 try:
     from .ml_pipeline import initialize_model, score_file, compute_sha256  # type: ignore
+    from .forensics import analyze_raw_image  # type: ignore
 except Exception:  # When executed as a script without package context
     from ml_pipeline import initialize_model, score_file, compute_sha256  # type: ignore
+    from forensics import analyze_raw_image  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,25 @@ async def analyze_file(file: UploadFile = File(...)):
     # 50MB limit to support larger forensic artifacts, adjustable as needed
     if len(contents) > 50 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext in {".raw", ".dd", ".img"}:
+        try:
+            result = analyze_raw_image(contents)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.exception("RAW image analysis failed: %s", e)
+            raise HTTPException(status_code=500, detail="RAW image analysis failed")
+
+        result_out = {
+            "filename": file.filename,
+            "num_files": result.get("num_files", 0),
+            "top_files": result.get("top_files", []),
+            "suspicious": result.get("suspicious", []),
+            "hashes": result.get("hashes", []),
+        }
+        return result_out
 
     try:
         risk_score = score_file(contents, file.filename)
