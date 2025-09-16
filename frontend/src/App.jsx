@@ -102,19 +102,17 @@ function App() {
     try {
       setUploading(true);
       setToast("");
-      const response = await axios.post("http://127.0.0.1:8000/upload", formData, {
+      const response = await axios.post("http://127.0.0.1:8000/analyze", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
-      setToast(`Upload successful. Risk score: ${response.data?.score ?? "-"}`);
+      setToast(`Upload successful. Risk score: ${response.data?.risk_score ?? "-"}`);
 
-      // Compute details client-side
-      const hash = await sha256HexFromFile(picked);
       const details = {
-        originalFilename: response.data?.original_filename ?? picked.name,
-        storedFilename: response.data?.stored_as ?? "-",
+        originalFilename: response.data?.filename ?? picked.name,
+        storedFilename: "-",
         fileSize: picked.size,
-        sha256: hash,
-        score: response.data?.score ?? 0,
+        sha256: response.data?.sha256 ?? "-",
+        score: response.data?.risk_score ?? 0,
       };
       setAnalysis(details);
       setShowPanel(true);
