@@ -713,3 +713,16 @@ body {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
+
+/* Smaller variant for action bar buttons */
+.action-bar .upload-btn {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.9rem;
+  border-radius: 8px;
+  min-width: auto;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.action-bar .upload-btn + .upload-btn {
+  margin-left: 0.5rem; /* space between buttons */
+}

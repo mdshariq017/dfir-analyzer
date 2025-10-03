@@ -167,6 +167,44 @@ function App() {
     pdf.save(`${safeName}.pdf`);
   };
 
+  // ----- Export CSV + JSON -----
+  const downloadBlob = (name, blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportCSV = async () => {
+    if (!analysis?.sha256) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/export/csv?sha256=${analysis.sha256}`);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const safe = (analysis.originalFilename || "dfir-analysis").replace(/[^\w.-]+/g, "_");
+      downloadBlob(`${safe}.csv`, blob);
+      setToast("CSV exported");
+    } catch (e) {
+      setToast("CSV export failed");
+    }
+  };
+
+  const exportJSON = async () => {
+    if (!analysis?.sha256) return;
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/export/json?sha256=${analysis.sha256}`);
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const safe = (analysis.originalFilename || "dfir-analysis").replace(/[^\w.-]+/g, "_");
+      downloadBlob(`${safe}.json`, blob);
+      setToast("JSON exported");
+    } catch (e) {
+      setToast("JSON export failed");
+    }
+  };
+
   return (
     <div className="app app-wide">
       {/* Top bar */}
@@ -311,6 +349,22 @@ function App() {
                     title={hasAnalysis ? "Export PDF" : "Upload a file first"}
                   >
                     Export PDF
+                  </button>
+                  <button
+                    className="upload-btn"
+                    onClick={exportCSV}
+                    disabled={!hasAnalysis}
+                    title={hasAnalysis ? "Export CSV" : "Upload a file first"}
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    className="upload-btn"
+                    onClick={exportJSON}
+                    disabled={!hasAnalysis}
+                    title={hasAnalysis ? "Export JSON" : "Upload a file first"}
+                  >
+                    Export JSON
                   </button>
                   <button
                     className="upload-btn"

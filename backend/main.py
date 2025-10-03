@@ -1,27 +1,29 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response, JSONResponse
 import os
 import uuid
 from pathlib import Path
 import logging
+from typing import Dict, Any, Optional, Tuple, Iterable, Union
+from collections import OrderedDict
 
 # Try to import ml_pipeline and forensics modules.
 # The fallback (except block) ensures this works whether run as a package or standalone script.
 try:
     from .ml_pipeline import initialize_model, score_file, compute_sha256  # type: ignore
-    from .forensics import analyze_raw_image  
+    from .forensics import analyze_raw_image  # type: ignore
 except Exception:  # When executed as a script without package context
     from ml_pipeline import initialize_model, score_file, compute_sha256  # type: ignore
-    from forensics import analyze_raw_image  
+    from forensics import analyze_raw_image  # type: ignore
 
 # Configure logger for error reporting and debugging
 logger = logging.getLogger(__name__)
 
-# Create the FastAPI application
+# ---------------------------
+# App & CORS
+# ---------------------------
 app = FastAPI()
-
-# Enable CORS so frontend (React/JS) can communicate with backend
-# In production, this should be restricted to specific domains
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],   # allow all origins (safe only in dev)
@@ -30,10 +32,11 @@ app.add_middleware(
     allow_headers=["*"],   # allow all headers
 )
 
-# Directory where uploaded files could be stored (ensures folder exists)
+# ---------------------------
+# Upload dir
+# ---------------------------
 UPLOAD_DIR = "data"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 
 def secure_filename(filename: str) -> str:
     """
@@ -43,19 +46,91 @@ def secure_filename(filename: str) -> str:
     ext = Path(filename).suffix.lower()
     return f"{uuid.uuid4()}{ext}"
 
+# ---------------------------
+# In-memory LRU cache for analysis results (sha256 -> dict)
+# ---------------------------
+class LRUCache(OrderedDict):
+    def __init__(self, capacity: int = 200):
+        super().__init__()
+        self.capacity = capacity
 
+    def get(self, key: str) -> Optional[dict]:
+        if key not in self:
+            return None
+        self.move_to_end(key)
+        return super().get(key)
+
+    def put(self, key: str, value: dict) -> None:
+        self[key] = value
+        self.move_to_end(key)
+        if len(self) > self.capacity:
+            self.popitem(last=False)
+
+ANALYSIS_CACHE: LRUCache = LRUCache(capacity=200)
+
+# ---------------------------
+# CSV builder
+# ---------------------------
+def _flatten(prefix: str, obj: Any) -> Iterable[Tuple[str, str]]:
+    """
+    Flatten dict/list scalars into (key, value) pairs for CSV.
+    - dict -> recurse with dotted keys
+    - list of dicts -> index notation key[idx].field
+    - simple list -> comma-joined string
+    - scalars -> str()
+    """
+    # dict
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            new_key = f"{prefix}.{k}" if prefix else str(k)
+            yield from _flatten(new_key, v)
+        return
+
+    # list
+    if isinstance(obj, list):
+        if all(isinstance(x, dict) for x in obj):
+            for i, item in enumerate(obj):
+                new_key = f"{prefix}[{i}]"
+                for k, v in item.items():
+                    yield from _flatten(f"{new_key}.{k}", v)
+        else:
+            # simple list -> comma-joined
+            yield (prefix, ", ".join(str(x) for x in obj))
+        return
+
+    # scalar
+    yield (prefix, "" if obj is None else str(obj))
+
+def _dict_to_csv(data: Dict[str, Any]) -> str:
+    """
+    Render a generic dict to a simple two-column CSV:
+    field,value
+    top_files[0].name, /foo/bar
+    ...
+    """
+    import csv
+    import io
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["field", "value"])
+    for k, v in _flatten("", data):
+        writer.writerow([k, v])
+    return buf.getvalue()
+
+# ---------------------------
+# Startup: load model once
+# ---------------------------
 @app.on_event("startup")
 def load_model_on_startup() -> None:
-    """
-    Run automatically when the server starts.
-    Loads the ML risk model into memory so that scoring is ready.
-    """
     try:
         initialize_model()
     except Exception as exc:
         logger.exception("Failed to load risk model on startup: %s", exc)
 
-
+# ---------------------------
+# Analyze endpoint (unchanged behavior, but now caches result)
+# ---------------------------
 @app.post("/analyze")
 async def analyze_file(file: UploadFile = File(...)):
     """
@@ -65,7 +140,6 @@ async def analyze_file(file: UploadFile = File(...)):
     - Else → run ML risk scoring
     Returns JSON results including filename, score/summary, and SHA256 hash.
     """
-    # Read full file contents
     contents = await file.read()
 
     # Reject empty uploads
@@ -76,46 +150,87 @@ async def analyze_file(file: UploadFile = File(...)):
     if len(contents) > 50 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large")
 
-    # Detect if the file is a RAW disk image
     ext = Path(file.filename).suffix.lower()
+
+    # RAW image path
     if ext in {".raw", ".dd", ".img"}:
         try:
-            # Analyze using forensic pipeline (pytsk3)
             result = analyze_raw_image(contents)
         except ValueError as e:
-            # User-level error (e.g., empty image)
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
-            # Unexpected internal error in forensic analysis
             logger.exception("RAW image analysis failed: %s", e)
             raise HTTPException(status_code=500, detail="RAW image analysis failed")
+
+        # Compute overall image sha256 so we can cache/export by hash
+        img_sha256 = compute_sha256(contents)
 
         # Build structured summary response for RAW images
         result_out = {
             "filename": file.filename,
+            "sha256": img_sha256,
             "num_files": result.get("num_files", 0),
             "top_files": result.get("top_files", []),
             "suspicious": result.get("suspicious", []),
             "hashes": result.get("hashes", []),
+            # accept 'timeline' if present from forensics.py (backward-safe)
+            "timeline": result.get("timeline", []),
         }
+
+        # Cache it by sha256
+        ANALYSIS_CACHE.put(img_sha256, result_out)
         return result_out
 
-    # If not RAW, run ML risk scoring
+    # Non-RAW: ML risk scoring
     try:
         risk_score = score_file(contents, file.filename)
     except RuntimeError as e:
-        # Model not loaded or unavailable
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        # Unexpected ML pipeline error
         raise HTTPException(status_code=500, detail=f"Scoring failed: {e}")
 
-    # Always compute SHA-256 for integrity verification
     sha256 = compute_sha256(contents)
-
-    # Build response for non-RAW files
-    return {
+    result_out = {
         "filename": file.filename,
         "risk_score": risk_score,   # 0–100 score from model
         "sha256": sha256,           # unique hash of uploaded file
     }
+
+    # Basic stub structure so exports are uniform keys-wise
+    ANALYSIS_CACHE.put(sha256, result_out)
+    return result_out
+
+# ---------------------------
+# Export endpoints
+# ---------------------------
+@app.get("/export/json")
+def export_json(sha256: str):
+    """
+    Return cached JSON analysis for a given sha256.
+    """
+    data = ANALYSIS_CACHE.get(sha256)
+    if not data:
+        raise HTTPException(status_code=404, detail="No cached analysis for given sha256")
+    return JSONResponse(content=data)
+
+@app.get("/export/csv")
+def export_csv(sha256: str):
+    """
+    Return a CSV (two-column: field,value) rendering of the cached analysis.
+    """
+    data = ANALYSIS_CACHE.get(sha256)
+    if not data:
+        raise HTTPException(status_code=404, detail="No cached analysis for given sha256")
+
+    try:
+        csv_text = _dict_to_csv(data)
+    except Exception as exc:
+        logger.exception("CSV rendering failed: %s", exc)
+        raise HTTPException(status_code=500, detail="CSV rendering failed")
+
+    # Suggest a filename in the headers
+    filename = f"{sha256}.csv"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    }
+    return Response(content=csv_text, media_type="text/csv", headers=headers)
