@@ -852,3 +852,85 @@ button[aria-disabled="true"] {
   cursor: not-allowed !important;
   filter: saturate(70%);
 }
+/* ===== Force full-screen centering for Login & Signup ===== */
+.auth-page {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: transparent;
+  z-index: 10;
+}
+
+/* Container for heading + form box */
+.auth-panel {
+  width: 400px;
+  max-width: 90vw;
+  text-align: center;
+}
+
+/* Heading */
+.auth-panel h1 {
+  font-size: 2.4rem;
+  color: #b8bbff;
+  margin-bottom: 24px;
+  text-align: center;
+}
+
+/* Card (form box) */
+.auth-card {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 28px 24px;
+  box-shadow: 0 4px 25px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+}
+
+/* Inputs + button uniform width */
+.auth-card input,
+.auth-card button {
+  width: 100%;
+  margin: 10px 0;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  font-size: 1rem;
+}
+
+.auth-card input {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.auth-card input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.auth-card button {
+  background: linear-gradient(90deg, #6C63FF, #8a7cff);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s ease-in-out;
+}
+
+.auth-card button:hover {
+  opacity: 0.9;
+}
+
+/* Footer text */
+.auth-subtext {
+  margin-top: 14px;
+  font-size: 0.95rem;
+  color: #c7cbff;
+}
+
+.auth-subtext a {
+  color: #8e8fff;
+  text-decoration: underline;
+}

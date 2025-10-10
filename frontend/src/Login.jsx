@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import axios from "axios";
 
 export default function Login() {
@@ -22,18 +22,32 @@ export default function Login() {
   };
 
   return (
-    <div className="app app-wide">
-      <h1 className="app-title">Log in</h1>
-      <div className="upload-card card" style={{ maxWidth: 460 }}>
-        <form onSubmit={submit} style={{ display: "grid", gap: 12 }}>
-          <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" />
-          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Password" />
-          <button className="upload-btn" type="submit">Log in</button>
-          {msg && <div className="error-message">{msg}</div>}
-        </form>
-        <p style={{ marginTop: 8 }}>
-          New here? <a href="/signup">Create an account</a>
-        </p>
+    <div className="auth-page">
+      <div className="auth-panel">
+        <h1>Log in</h1>
+        <div className="auth-card">
+          <form onSubmit={submit}>
+            <input
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              required
+            />
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+            <button type="submit">Log in</button>
+            {msg && <div className="error-message">{msg}</div>}
+          </form>
+          <p className="auth-subtext">
+            New here? <Link to="/signup">Create an account</Link>
+          </p>
+        </div>
       </div>
     </div>
   );
