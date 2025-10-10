@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 import {
   ResponsiveContainer,
   PieChart,
@@ -17,31 +18,90 @@ import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
 import "./App.css";
 
+// Attach JWT automatically
+axios.interceptors.request.use((config) => {
+  const t = localStorage.getItem("token");
+  if (t) config.headers.Authorization = `Bearer ${t}`;
+  return config;
+});
+
 function App() {
-  // ----- Mock dashboard numbers (replace with API later) -----
-  const totalScans = 123;
-  const avgRiskScore = 42.7;
-  const highRiskFiles = 8;
+  const navigate = useNavigate();
+  const [token, setToken] = useState(localStorage.getItem("token"));
+  const [name, setName] = useState(localStorage.getItem("name") || "Guest");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [stats, setStats] = useState(null);
+  const [history, setHistory] = useState([]);
 
-  const fileTypeData = [
-    { name: "PDF", value: 25, color: "#6C63FF" },
-    { name: "ZIP", value: 20, color: "#25CED1" },
-    { name: "DOCX", value: 15, color: "#1DB954" },
-    { name: "Other", value: 40, color: "#F29E4C" },
-  ];
+  useEffect(() => {
+    const onStorage = () => {
+      setToken(localStorage.getItem("token"));
+      setName(localStorage.getItem("name") || "Guest");
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
-  const scanHistoryData = [
-    { time: 1, scans: 5 },
-    { time: 2, scans: 12 },
-    { time: 3, scans: 18 },
-    { time: 4, scans: 22 },
-    { time: 5, scans: 32 },
-    { time: 6, scans: 28 },
-    { time: 7, scans: 38 },
-    { time: 8, scans: 25 },
-    { time: 9, scans: 48 },
-    { time: 10, scans: 60 },
-  ];
+  const logout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("name");
+    setToken(null);
+    setName("Guest");
+    navigate("/login");
+  };
+
+  const loadDash = async () => {
+    if (!token) { setStats(null); setHistory([]); return; }
+    try {
+      const [s, h] = await Promise.all([
+        axios.get("http://127.0.0.1:8000/stats"),
+        axios.get("http://127.0.0.1:8000/history?limit=50"),
+      ]);
+      setStats(s.data);
+      setHistory(h.data);
+    } catch (e) {
+      console.error("Failed to load stats/history", e);
+    }
+  };
+
+  useEffect(() => { loadDash(); }, [token]);
+
+  // ----- Dashboard numbers (live if signed in, fallback to demo) -----
+  const demo = { total: 123, avg: 42.7, high: 8 };
+  const totalScans = stats?.total_scans ?? demo.total;
+  const avgRiskScore = stats?.avg_risk ?? demo.avg;
+  const highRiskFiles = stats?.high_risk ?? demo.high;
+
+  // map server ext -> friendly label + color
+  const _extLabel = (ext) => {
+    const e = (ext || "").toLowerCase();
+    if (e === ".pdf") return "PDF";
+    if (e === ".zip") return "ZIP";
+    if (e === ".docx" || e === ".doc") return "DOCX";
+    return "Other";
+  };
+  const _colorFor = (label) => {
+    if (label === "PDF") return "#6C63FF";
+    if (label === "ZIP") return "#25CED1";
+    if (label === "DOCX") return "#1DB954";
+    return "#F29E4C";
+  };
+
+  const fileTypeData = (stats?.types ?? [
+    { ext: ".pdf", count: 25 },
+    { ext: ".zip", count: 20 },
+    { ext: ".docx", count: 15 },
+    { ext: ".other", count: 40 },
+  ]).map(t => {
+    const label = _extLabel(t.ext);
+    return { name: label, value: t.count, color: _colorFor(label) };
+  });
+
+  const scanHistoryData = (() => {
+    const times = stats?.times ?? Array.from({length:10}, (_,i)=>i+1); // demo ticks
+    // Simple cumulative trend: 1..N
+    return times.map((_, idx) => ({ time: idx + 1, scans: idx + 1 }));
+  })();
 
   const riskBand = useMemo(() => {
     if (avgRiskScore <= 40) return "Low";
@@ -79,6 +139,33 @@ function App() {
     return "High-risk file. Immediate review and quarantine recommended.";
   };
 
+  // ----- Timeline helpers -----
+  const formatDateTime = (sec) => {
+    if (!sec || !Number.isFinite(sec)) return "-";
+    const d = new Date(sec * 1000);
+    return d.toLocaleString();
+  };
+
+  const getBaseName = (p) => {
+    if (!p) return "";
+    const parts = p.split("/");
+    return parts[parts.length - 1] || p;
+  };
+
+  const buildTimelineData = (timeline, limit = 30) => {
+    if (!Array.isArray(timeline)) return [];
+    const filtered = timeline
+      .filter(t => Number.isFinite(t?.mtime))
+      .sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
+      .slice(0, limit);
+    return filtered.map((t, idx) => ({
+      idx,
+      mtime: t.mtime,
+      sizeKB: Math.max(0, (t.size || 0) / 1024),
+      label: getBaseName(t.path),
+    }));
+  };
+
   const handleCopy = async (text) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -114,6 +201,7 @@ function App() {
         score: response.data?.risk_score ?? 0,
       };
       setAnalysis(details);
+      await loadDash();
     } catch (err) {
       setToast(err.response?.data?.detail || "Upload failed. Try again.");
     } finally {
@@ -212,9 +300,32 @@ function App() {
         <div>
           <h1 className="app-title">DFIR Analyzer</h1>
         </div>
-        <div className="welcome">
-          <span className="welcome-text">Welcome, John Doe</span>
-          <div className="avatar" aria-label="Profile placeholder" />
+        <div className="topbar-right">
+          <span className="welcome-text">Welcome, {name}</span>
+
+          <div className="avatar-wrap" onBlur={() => setMenuOpen(false)} tabIndex={0}>
+            <button className="avatar-btn" onClick={() => setMenuOpen(v => !v)}>
+              {token ? (
+                (name?.[0] || "U").toString().toUpperCase()
+              ) : (
+                <img src="/login.png" alt="Login" className="login-icon" />
+              )}
+            </button>
+            {menuOpen && (
+              <div className="avatar-menu">
+                {!token ? (
+                  <>
+                    <button onClick={() => navigate("/signup")}>Sign up</button>
+                    <button onClick={() => navigate("/login")}>Log in</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={logout}>Logout</button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -438,6 +549,54 @@ function App() {
                   : "Upload a file to get recommendations."}
               </p>
             </div>
+            {analysis?.timeline?.length ? (
+              <div className="panel-section">
+                <div className="card-title" style={{ marginLeft: 0, marginBottom: ".5rem" }}>
+                  File Timeline (by mtime)
+                </div>
+                <div style={{ width: "100%", height: 220 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={buildTimelineData(analysis.timeline)} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+                      <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+                      <XAxis
+                        dataKey="idx"
+                        stroke="#8b8b9b"
+                        tickLine={false}
+                        axisLine={false}
+                        label={{ value: "Recent files", position: "insideBottom", dy: 10, fill: "#8b8b9b" }}
+                      />
+                      <YAxis
+                        dataKey="sizeKB"
+                        stroke="#8b8b9b"
+                        tickLine={false}
+                        axisLine={false}
+                        label={{ value: "Size (KB)", angle: -90, position: "insideLeft", dx: -5, fill: "#8b8b9b" }}
+                      />
+                      <Tooltip
+                        formatter={(value, name, props) => {
+                          if (name === "sizeKB") return [`${value.toFixed(1)} KB`, "Size"];
+                          return [value, name];
+                        }}
+                        labelFormatter={(idx) => {
+                          const d = buildTimelineData(analysis.timeline)[idx];
+                          return d ? `${d.label} � ${formatDateTime(d.mtime)}` : "";
+                        }}
+                        contentStyle={{
+                          background: "rgba(20,20,40,0.9)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: 8,
+                        }}
+                      />
+                      <Line type="monotone" dataKey="sizeKB" stroke="#9b7bff" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{ color: "#a0a0b4", fontSize: ".85rem", marginTop: ".5rem" }}>
+                  Showing up to 30 most recently modified files.
+                </div>
+              </div>
+            ) : null}
+
           </div>
         </aside>
       </div>

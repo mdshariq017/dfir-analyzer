@@ -726,3 +726,65 @@ body {
 .action-bar .upload-btn + .upload-btn {
   margin-left: 0.5rem; /* space between buttons */
 }
+
+/* Header menu styles */
+.topbar-right { 
+  position: absolute; 
+  right: 24px; 
+  top: 20px; 
+  display: flex; 
+  gap: 12px; 
+  align-items: center; 
+}
+
+.avatar-wrap { 
+  position: relative; 
+}
+
+.avatar-btn { 
+  width: 40px; 
+  height: 40px; 
+  border: none; 
+  border-radius: 999px; 
+  cursor: pointer; 
+  color: #fff; 
+  background: #7a6cf5; 
+  font-weight: 700; 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.avatar-menu { 
+  position: absolute; 
+  right: 0; 
+  margin-top: 8px; 
+  min-width: 180px; 
+  background: #1f1f2b; 
+  border: 1px solid rgba(255,255,255,.08); 
+  border-radius: 12px; 
+  padding: 8px; 
+  box-shadow: 0 10px 24px rgba(0,0,0,.35); 
+  z-index: 30; 
+}
+
+.avatar-menu button { 
+  width: 100%; 
+  text-align: left; 
+  background: transparent; 
+  border: none; 
+  color: #ddd; 
+  padding: 10px 12px; 
+  border-radius: 8px; 
+  cursor: pointer; 
+}
+
+.avatar-menu button:hover { 
+  background: rgba(255,255,255,.06); 
+}
