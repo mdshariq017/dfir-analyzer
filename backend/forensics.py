@@ -209,6 +209,25 @@ def analyze_raw_image(file_bytes: bytes, top_n: int = 10) -> Dict:
                 logger.debug("Traversal failed on %s: %s", mount_label, exc)
                 continue
 
+    timeline = [
+        {
+            "path": r.path,
+            "size": r.size,
+            "ctime": r.ctime,
+            "mtime": r.mtime,
+            "atime": r.atime,
+        }
+        for r in records
+    ]
+    timeline.sort(
+        key=lambda item: (
+            item["mtime"] is None,
+            -item["mtime"] if item["mtime"] is not None else 0,
+            item["ctime"] is None,
+            -item["ctime"] if item["ctime"] is not None else 0,
+        )
+    )
+
     # Prepare summary
     records.sort(key=lambda r: r.size, reverse=True)
     top_records = records[:top_n]
@@ -219,6 +238,7 @@ def analyze_raw_image(file_bytes: bytes, top_n: int = 10) -> Dict:
         ],
         "suspicious": sorted(list(dict.fromkeys(suspicious_names))),
         "hashes": all_hashes,
+        "timeline": timeline,
     }
     return summary
 

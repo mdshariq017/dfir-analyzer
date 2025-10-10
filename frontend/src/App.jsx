@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import {
   ResponsiveContainer,
   PieChart,
@@ -32,6 +32,20 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [stats, setStats] = useState(null);
   const [history, setHistory] = useState([]);
+
+  // --- Avatar dropdown open/close handling ---
+  const avatarRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e) => {
+      if (avatarRef.current && !avatarRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [menuOpen]);
 
   useEffect(() => {
     const onStorage = () => {
@@ -303,7 +317,7 @@ function App() {
         <div className="topbar-right">
           <span className="welcome-text">Welcome, {name}</span>
 
-          <div className="avatar-wrap" onBlur={() => setMenuOpen(false)} tabIndex={0}>
+          <div className="avatar-wrap" ref={avatarRef} tabIndex={0}>
             <button className="avatar-btn" onClick={() => setMenuOpen(v => !v)}>
               {token ? (
                 (name?.[0] || "U").toString().toUpperCase()
@@ -311,16 +325,37 @@ function App() {
                 <img src="/login.png" alt="Login" className="login-icon" />
               )}
             </button>
+
             {menuOpen && (
               <div className="avatar-menu">
                 {!token ? (
                   <>
-                    <button onClick={() => navigate("/signup")}>Sign up</button>
-                    <button onClick={() => navigate("/login")}>Log in</button>
+                    <Link
+                      to="/signup"
+                      onMouseDown={(e) => e.preventDefault()} // prevent blur before click
+                      onClick={() => setMenuOpen(false)}     // close menu after nav
+                    >
+                      Sign up
+                    </Link>
+                    <Link
+                      to="/login"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Log in
+                    </Link>
                   </>
                 ) : (
                   <>
-                    <button onClick={logout}>Logout</button>
+                    <button
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        logout();
+                      }}
+                    >
+                      Logout
+                    </button>
                   </>
                 )}
               </div>

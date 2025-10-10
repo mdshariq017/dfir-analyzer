@@ -769,22 +769,37 @@ body {
   background: #1f1f2b; 
   border: 1px solid rgba(255,255,255,.08); 
   border-radius: 12px; 
-  padding: 8px; 
+  padding: 12px 8px; 
   box-shadow: 0 10px 24px rgba(0,0,0,.35); 
   z-index: 30; 
 }
 
-.avatar-menu button { 
+.avatar-menu button,
+.avatar-menu a { 
   width: 100%; 
   text-align: left; 
   background: transparent; 
   border: none; 
   color: #ddd; 
-  padding: 10px 12px; 
+  padding: 14px 16px; 
   border-radius: 8px; 
   cursor: pointer; 
+  text-decoration: none;
+  display: block;
+  margin-bottom: 4px;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  font-weight: 500;
 }
 
-.avatar-menu button:hover { 
-  background: rgba(255,255,255,.06); 
+.avatar-menu button:last-child,
+.avatar-menu a:last-child { 
+  margin-bottom: 0; 
+}
+
+.avatar-menu button:hover,
+.avatar-menu a:hover { 
+  background: rgba(255,255,255,.08); 
+  color: #fff;
+  transform: translateX(2px);
 }

@@ -1,12 +1,29 @@
+# --- Core backend ---
 fastapi==0.116.1
 uvicorn==0.35.0
+python-multipart==0.0.20
+pydantic==2.11.7
+pydantic-settings==2.5.2
+
+# --- Auth & crypto ---
+pyjwt==2.9.0
+passlib[bcrypt]==1.7.4
+
+# --- ML stack (matches your pickle) ---
 numpy==2.3.2
 scikit-learn==1.7.1
 scipy==1.16.0
 joblib==1.5.1
-python-multipart==0.0.20
-pydantic==2.11.7
-pydantic-settings==2.5.2
-pyjwt==2.9.0
-passlib[bcrypt]==1.7.4
+
+# --- Mongo & utils ---
 motor==3.6.0
+pymongo==4.9.2
+PyYAML==6.0.2
+requests
+aiofiles
+python-dotenv
+pymupdf>=1.24
+
+# --- Optional / OS-sensitive (skip on Windows) ---
+yara-python ; platform_system != "Windows"
+pytsk3==20250312 ; platform_system != "Windows"

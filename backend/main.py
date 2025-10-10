@@ -1,12 +1,14 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 import os
 import uuid
 from pathlib import Path
 import logging
+import time
 from typing import Dict, Any, Optional, Tuple, Iterable, Union
 from collections import OrderedDict
+from pymongo import MongoClient
 
 # Try to import ml_pipeline and forensics modules.
 # The fallback (except block) ensures this works whether run as a package or standalone script.
@@ -37,6 +39,35 @@ app.add_middleware(
 # ---------------------------
 UPLOAD_DIR = "data"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# ---------------------------
+# MongoDB (pymongo) bootstrap
+# ---------------------------
+MONGODB_URI = os.getenv(
+    "MONGODB_URI",
+    "mongodb+srv://dfir_app:qazplmedc100@finance-tracker.wvcboup.mongodb.net/dfir?retryWrites=true&w=majority&appName=finance-tracker"
+)
+DB_NAME = os.getenv("DB_NAME", "dfir")
+
+client = MongoClient(MONGODB_URI)
+db = client[DB_NAME]
+
+def _init_indexes():
+    try:
+        db.users.create_index("email", unique=True)
+    except Exception:
+        pass
+    try:
+        db.scans.create_index([("user_id", 1), ("created_at", -1)])
+    except Exception:
+        pass
+
+def _user_id_from_request(req: Request) -> str:
+    # Try to take the raw Bearer token value as a stable user key (simple & works with your frontend)
+    auth = req.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer ") and len(auth.split(" ", 1)[1].strip()) > 0:
+        return auth.split(" ", 1)[1].strip()
+    return "anon"
 
 def secure_filename(filename: str) -> str:
     """
@@ -125,6 +156,7 @@ def _dict_to_csv(data: Dict[str, Any]) -> str:
 def load_model_on_startup() -> None:
     try:
         initialize_model()
+        _init_indexes()
     except Exception as exc:
         logger.exception("Failed to load risk model on startup: %s", exc)
 
@@ -132,7 +164,7 @@ def load_model_on_startup() -> None:
 # Analyze endpoint (unchanged behavior, but now caches result)
 # ---------------------------
 @app.post("/analyze")
-async def analyze_file(file: UploadFile = File(...)):
+async def analyze_file(file: UploadFile = File(...), request: Request = None):
     """
     Main API endpoint for file analysis.
     - Accepts uploaded file
@@ -177,6 +209,19 @@ async def analyze_file(file: UploadFile = File(...)):
             "timeline": result.get("timeline", []),
         }
 
+        # persist a scan document
+        try:
+            db.scans.insert_one({
+                "user_id": _user_id_from_request(request),
+                "type": "raw",
+                "filename": file.filename,
+                "sha256": img_sha256,
+                "summary": result_out,
+                "created_at": time.time(),
+            })
+        except Exception:
+            logger.exception("Failed to save RAW scan")
+
         # Cache it by sha256
         ANALYSIS_CACHE.put(img_sha256, result_out)
         return result_out
@@ -195,6 +240,19 @@ async def analyze_file(file: UploadFile = File(...)):
         "risk_score": risk_score,   # 0–100 score from model
         "sha256": sha256,           # unique hash of uploaded file
     }
+
+    # persist a scan document
+    try:
+        db.scans.insert_one({
+            "user_id": _user_id_from_request(request),
+            "type": "file",
+            "filename": file.filename,
+            "sha256": sha256,
+            "score": risk_score,
+            "created_at": time.time(),
+        })
+    except Exception:
+        logger.exception("Failed to save scan")
 
     # Basic stub structure so exports are uniform keys-wise
     ANALYSIS_CACHE.put(sha256, result_out)
@@ -234,3 +292,70 @@ def export_csv(sha256: str):
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
     return Response(content=csv_text, media_type="text/csv", headers=headers)
+
+# ---------------------------
+# History & Stats
+# ---------------------------
+
+@app.get("/history")
+def history(limit: int = 50, request: Request = None):
+    uid = _user_id_from_request(request)
+    cur = db.scans.find({"user_id": uid}).sort("created_at", -1).limit(limit)
+    out = []
+    for d in cur:
+        d["_id"] = str(d["_id"])
+        out.append(d)
+    return out
+
+@app.get("/stats")
+def stats(request: Request = None, high_threshold: int = 70):
+    uid = _user_id_from_request(request)
+
+    total = db.scans.count_documents({"user_id": uid})
+
+    # average risk over non-RAW with a score
+    pipeline_avg = [
+        {"$match": {"user_id": uid, "type": "file", "score": {"$ne": None}}},
+        {"$group": {"_id": None, "avg": {"$avg": "$score"}}}
+    ]
+    docs = list(db.scans.aggregate(pipeline_avg))
+    avg_risk = round(docs[0]["avg"], 1) if docs else 0.0
+
+    high_risk = db.scans.count_documents({"user_id": uid, "type": "file", "score": {"$gte": high_threshold}})
+
+    # File-type breakdown via filename extension
+    pipeline_types = [
+        {"$match": {"user_id": uid}},
+        {"$project": {
+            "ext": {
+                "$toLower": {
+                    "$let": {
+                        "vars": {"arr": {"$split": ["$filename", "."]}},
+                        "in": {
+                            "$concat": [".", {"$arrayElemAt": ["$$arr", {"$subtract": [{"$size": "$$arr"}, 1]}]}]
+                        }
+                    }
+                }
+            }
+        }},
+        {"$group": {"_id": "$ext", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]
+    types = [{"ext": d["_id"] or "other", "count": d["count"]} for d in db.scans.aggregate(pipeline_types)]
+
+    # simple series = just the last N timestamps
+    pipeline_series = [
+        {"$match": {"user_id": uid}},
+        {"$sort": {"created_at": 1}},
+        {"$project": {"t": "$created_at"}}
+    ]
+    times = [d["t"] for d in db.scans.aggregate(pipeline_series)]
+
+    return {
+        "total_scans": total,
+        "avg_risk": avg_risk,
+        "high_risk": high_risk,
+        "types": types,
+        "times": times[-10:],
+        "high_threshold": high_threshold
+    }
