@@ -1,3 +1,8 @@
+from dotenv import load_dotenv
+try:
+    from .routes.auth import router as auth_router, set_db as auth_set_db  # when run as package: uvicorn backend.main:app
+except Exception:
+    from routes.auth import router as auth_router, set_db as auth_set_db   # when run from inside backend/: uvicorn main:app
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
@@ -9,6 +14,9 @@ import time
 from typing import Dict, Any, Optional, Tuple, Iterable, Union
 from collections import OrderedDict
 from pymongo import MongoClient
+
+# Load environment variables from .env (if present)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 # Try to import ml_pipeline and forensics modules.
 # The fallback (except block) ensures this works whether run as a package or standalone script.
@@ -51,6 +59,10 @@ DB_NAME = os.getenv("DB_NAME", "dfir")
 
 client = MongoClient(MONGODB_URI)
 db = client[DB_NAME]
+
+# Plug DB into auth module and include routes
+auth_set_db(db)
+app.include_router(auth_router)
 
 def _init_indexes():
     try:
