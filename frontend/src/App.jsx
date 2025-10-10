@@ -28,6 +28,7 @@ axios.interceptors.request.use((config) => {
 function App() {
   const navigate = useNavigate();
   const [token, setToken] = useState(localStorage.getItem("token"));
+  const isGuest = !token || token.trim() === "";
   const [name, setName] = useState(localStorage.getItem("name") || "Guest");
   const [menuOpen, setMenuOpen] = useState(false);
   const [stats, setStats] = useState(null);
@@ -215,7 +216,9 @@ function App() {
         score: response.data?.risk_score ?? 0,
       };
       setAnalysis(details);
-      await loadDash();
+      if (!isGuest) {
+        await loadDash(); // only refresh stats/history for signed-in users
+      }
     } catch (err) {
       setToast(err.response?.data?.detail || "Upload failed. Try again.");
     } finally {
@@ -385,27 +388,47 @@ function App() {
         </div>
 
         {/* Upload in the top row for better first impression */}
-        <div className="upload-card card">
-          <div className="panel-title">Upload File</div>
-          <input
-            ref={hiddenFileInputRef}
-            type="file"
-            onChange={handleUpload}
-            style={{ display: "none" }}
-          />
-          <button
-            className={`upload-btn ${uploading ? "loading" : ""}`}
-            onClick={() => hiddenFileInputRef.current?.click()}
-            disabled={uploading}
-          >
-            {uploading ? "Uploading..." : "Upload File"}
-          </button>
-          {toast && <div className="toast">{toast}</div>}
-          {!analysis && (
-            <div className="panel-placeholder" style={{ marginTop: ".5rem" }}>
-              Upload a file to view detailed analysis.
+        <div>
+          {isGuest && (
+            <div className="guest-banner" role="note" aria-live="polite">
+              You're in <strong>guest mode</strong> - try analyzing a file to preview results.
+              <span className="cta" onClick={() => navigate("/signup")}>
+                Sign up or log in
+              </span>{" "}
+              to save scans & enable exports.
             </div>
           )}
+          <div className="upload-card card">
+            {isGuest && (
+              <div className="upload-tip">
+                Uploads in guest mode won't be saved.{" "}
+                <span className="link" onClick={() => navigate("/signup")}>
+                  Create an account
+                </span>{" "}
+                to keep history & stats.
+              </div>
+            )}
+            <div className="panel-title">Upload File</div>
+            <input
+              ref={hiddenFileInputRef}
+              type="file"
+              onChange={handleUpload}
+              style={{ display: "none" }}
+            />
+            <button
+              className={`upload-btn ${uploading ? "loading" : ""}`}
+              onClick={() => hiddenFileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              {uploading ? "Uploading..." : "Upload File"}
+            </button>
+            {toast && <div className="toast">{toast}</div>}
+            {!analysis && (
+              <div className="panel-placeholder" style={{ marginTop: ".5rem" }}>
+                Upload a file to view detailed analysis.
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -484,31 +507,39 @@ function App() {
           {/* ACTION BAR: always visible; disabled before upload */}
           {(() => {
             const hasAnalysis = !!analysis;
+            const canExport = hasAnalysis && !isGuest;
+            const exportTitle = (label) => {
+              if (!hasAnalysis) return "Upload a file first";
+              return isGuest ? `Sign in to export ${label}` : "";
+            };
             return (
               <div className="panel-section action-bar">
                 <div className="panel-title">Analysis Details</div>
                 <div className="actions">
                   <button
                     className="upload-btn"
-                    onClick={exportPDF}
-                    disabled={!hasAnalysis}
-                    title={hasAnalysis ? "Export PDF" : "Upload a file first"}
+                    disabled={!canExport}
+                    aria-disabled={!canExport}
+                    title={exportTitle("PDF")}
+                    onClick={canExport ? exportPDF : undefined}
                   >
                     Export PDF
                   </button>
                   <button
                     className="upload-btn"
-                    onClick={exportCSV}
-                    disabled={!hasAnalysis}
-                    title={hasAnalysis ? "Export CSV" : "Upload a file first"}
+                    disabled={!canExport}
+                    aria-disabled={!canExport}
+                    title={exportTitle("CSV")}
+                    onClick={canExport ? exportCSV : undefined}
                   >
                     Export CSV
                   </button>
                   <button
                     className="upload-btn"
-                    onClick={exportJSON}
-                    disabled={!hasAnalysis}
-                    title={hasAnalysis ? "Export JSON" : "Upload a file first"}
+                    disabled={!canExport}
+                    aria-disabled={!canExport}
+                    title={exportTitle("JSON")}
+                    onClick={canExport ? exportJSON : undefined}
                   >
                     Export JSON
                   </button>
@@ -640,3 +671,4 @@ function App() {
 }
 
 export default App;
+

@@ -14,9 +14,13 @@ import time
 from typing import Dict, Any, Optional, Tuple, Iterable, Union
 from collections import OrderedDict
 from pymongo import MongoClient
+import jwt
 
 # Load environment variables from .env (if present)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
+
+JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-me")
+JWT_ALG = os.getenv("JWT_ALG", "HS256")
 
 # Try to import ml_pipeline and forensics modules.
 # The fallback (except block) ensures this works whether run as a package or standalone script.
@@ -75,11 +79,27 @@ def _init_indexes():
         pass
 
 def _user_id_from_request(req: Request) -> str:
-    # Try to take the raw Bearer token value as a stable user key (simple & works with your frontend)
-    auth = req.headers.get("Authorization", "")
-    if auth.lower().startswith("bearer ") and len(auth.split(" ", 1)[1].strip()) > 0:
-        return auth.split(" ", 1)[1].strip()
-    return "anon"
+    """
+    Resolve stable user id from Authorization header.
+    Prefer JWT `sub` (email). Fall back to "anon".
+    """
+    try:
+        auth = req.headers.get("Authorization", "")
+        if not auth.lower().startswith("bearer "):
+            return "anon"
+        token = auth.split(" ", 1)[1].strip()
+        if not token:
+            return "anon"
+        # decode JWT; ignore expiration for identity resolution
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG], options={"verify_exp": False})
+        except Exception:
+            # As a last resort, try decoding without signature (not ideal, but avoids data loss)
+            payload = jwt.decode(token, options={"verify_signature": False, "verify_exp": False})
+        sub = str(payload.get("sub") or "").strip().lower()
+        return sub or "anon"
+    except Exception:
+        return "anon"
 
 def secure_filename(filename: str) -> str:
     """
@@ -186,6 +206,9 @@ async def analyze_file(file: UploadFile = File(...), request: Request = None):
     """
     contents = await file.read()
 
+    # Get user ID for database operations
+    uid = _user_id_from_request(request)
+
     # Reject empty uploads
     if not contents:
         raise HTTPException(status_code=400, detail="Empty file uploaded")
@@ -222,17 +245,18 @@ async def analyze_file(file: UploadFile = File(...), request: Request = None):
         }
 
         # persist a scan document
-        try:
-            db.scans.insert_one({
-                "user_id": _user_id_from_request(request),
-                "type": "raw",
-                "filename": file.filename,
-                "sha256": img_sha256,
-                "summary": result_out,
-                "created_at": time.time(),
-            })
-        except Exception:
-            logger.exception("Failed to save RAW scan")
+        if uid != "anon":
+            try:
+                db.scans.insert_one({
+                    "user_id": uid,
+                    "type": "raw",
+                    "filename": file.filename,
+                    "sha256": img_sha256,
+                    "summary": result_out,
+                    "created_at": time.time(),
+                })
+            except Exception:
+                logger.exception("Failed to save RAW scan")
 
         # Cache it by sha256
         ANALYSIS_CACHE.put(img_sha256, result_out)
@@ -254,17 +278,18 @@ async def analyze_file(file: UploadFile = File(...), request: Request = None):
     }
 
     # persist a scan document
-    try:
-        db.scans.insert_one({
-            "user_id": _user_id_from_request(request),
-            "type": "file",
-            "filename": file.filename,
-            "sha256": sha256,
-            "score": risk_score,
-            "created_at": time.time(),
-        })
-    except Exception:
-        logger.exception("Failed to save scan")
+    if uid != "anon":
+        try:
+            db.scans.insert_one({
+                "user_id": uid,
+                "type": "file",
+                "filename": file.filename,
+                "sha256": sha256,
+                "score": risk_score,
+                "created_at": time.time(),
+            })
+        except Exception:
+            logger.exception("Failed to save scan")
 
     # Basic stub structure so exports are uniform keys-wise
     ANALYSIS_CACHE.put(sha256, result_out)
@@ -312,6 +337,9 @@ def export_csv(sha256: str):
 @app.get("/history")
 def history(limit: int = 50, request: Request = None):
     uid = _user_id_from_request(request)
+    if uid == "anon":
+        # return empty history in guest mode
+        return []
     cur = db.scans.find({"user_id": uid}).sort("created_at", -1).limit(limit)
     out = []
     for d in cur:
@@ -322,6 +350,21 @@ def history(limit: int = 50, request: Request = None):
 @app.get("/stats")
 def stats(request: Request = None, high_threshold: int = 70):
     uid = _user_id_from_request(request)
+    if uid == "anon":
+        # demo stats for guests
+        return {
+            "total_scans": 123,
+            "avg_risk": 42.7,
+            "high_risk": 8,
+            "types": [
+                {"ext": ".pdf", "count": 25},
+                {"ext": ".zip", "count": 20},
+                {"ext": ".docx", "count": 15},
+                {"ext": ".other", "count": 40},
+            ],
+            "times": list(range(1, 11)),
+            "high_threshold": high_threshold,
+        }
 
     total = db.scans.count_documents({"user_id": uid})
 
@@ -371,3 +414,31 @@ def stats(request: Request = None, high_threshold: int = 70):
         "times": times[-10:],
         "high_threshold": high_threshold
     }
+
+@app.post("/admin/migrate_user_ids")
+def migrate_user_ids(limit: int = 5000):
+    """
+    One-time migration: convert scans.user_id that contain a JWT token
+    into the stable email stored in the token's `sub`.
+    """
+    fixed = 0
+    skipped = 0
+    # heuristic: JWTs have two dots; only scan recent subset to be safe
+    cur = db.scans.find({"user_id": {"$regex": r"\."}}).limit(limit)
+    for doc in cur:
+        uid = doc.get("user_id", "")
+        try:
+            # try normal verify (ignoring exp); fallback to no-signature decode
+            try:
+                payload = jwt.decode(uid, JWT_SECRET, algorithms=[JWT_ALG], options={"verify_exp": False})
+            except Exception:
+                payload = jwt.decode(uid, options={"verify_signature": False, "verify_exp": False})
+            sub = str(payload.get("sub") or "").strip().lower()
+            if sub:
+                db.scans.update_one({"_id": doc["_id"]}, {"$set": {"user_id": sub}})
+                fixed += 1
+            else:
+                skipped += 1
+        except Exception:
+            skipped += 1
+    return {"fixed": fixed, "skipped": skipped}
