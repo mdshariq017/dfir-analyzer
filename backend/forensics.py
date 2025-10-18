@@ -121,36 +121,60 @@ def analyze_raw_image(file_bytes: bytes, top_n: int = 10) -> Dict:
     - suspicious: list of filenames (basename) with suspicious extensions observed
     - hashes: list of {name, sha256} for all files (size omitted for brevity)
     """
+    import time
     import pytsk3  # type: ignore
 
     if not file_bytes:
         raise ValueError("Empty RAW image provided")
 
-    # Persist to a temporary file because pytsk3 requires a file path
-    with tempfile.NamedTemporaryFile(prefix="dfir_raw_", suffix=".img", delete=True) as tmp:
-        tmp.write(file_bytes)
-        tmp.flush()
+    tmp_path = None
+    records: List[FileRecord] = []
+    suspicious_names: List[str] = []
+    all_hashes: List[Dict[str, str]] = []
 
-        # Open the image and detect volumes/filesystems
-        img_info = pytsk3.Img_Info(tmp.name)
+    # 1) Create a real file path + write bytes, then CLOSE handle before pytsk3 opens it
+    fd = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(prefix="dfir_raw_", suffix=".img")
+        with os.fdopen(fd, "wb") as f:
+            f.write(file_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+        fd = None  # fd is owned by the closed file object now
 
-        # Attempt to open as a filesystem directly first
+        # 2) Open with pytsk3 (with a small retry to dodge AV/Indexing locks)
+        img_info = None
+        for attempt in range(3):
+            try:
+                img_info = pytsk3.Img_Info(tmp_path)
+                break
+            except OSError as e:
+                # brief wait and retry once or twice
+                if attempt < 2:
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
+                raise
+
+        # 3) Try FS directly; if that fails, try partitioned volume
         fs_objects: List[Tuple[str, object]] = []
         try:
             fs = pytsk3.FS_Info(img_info)
             fs_objects.append(("/", fs))
         except Exception:
-            # If not a single FS, try volume system (partitioned image)
             try:
                 vs = pytsk3.Volume_Info(img_info)
                 for part in vs:
                     try:
                         if getattr(part, "len", 0) <= 0:
                             continue
-                        start_offset = part.start * 512  # sectors to bytes
+                        start_offset = part.start * 512  # sectors -> bytes
                         fs = pytsk3.FS_Info(img_info, offset=start_offset)
                         label = getattr(part, "desc", b"")
-                        label_str = label.decode(errors="ignore") if isinstance(label, (bytes, bytearray)) else str(label)
+                        label_str = (
+                            label.decode(errors="ignore")
+                            if isinstance(label, (bytes, bytearray))
+                            else str(label)
+                        )
                         mount = f"partition@{start_offset}:{label_str}".strip(":")
                         fs_objects.append((mount, fs))
                     except Exception:
@@ -158,17 +182,13 @@ def analyze_raw_image(file_bytes: bytes, top_n: int = 10) -> Dict:
             except Exception as exc:
                 logger.warning("Failed to open volume system: %s", exc)
 
-        records: List[FileRecord] = []
-        suspicious_names: List[str] = []
-        all_hashes: List[Dict[str, str]] = []
-
+        # 4) Traverse and hash
         for mount_label, fs in fs_objects:
             try:
                 for path, entry in _iter_fs_entries(fs):
                     try:
                         tsk_file = entry.as_file()
                     except Exception:
-                        # Open via path as a fallback
                         try:
                             tsk_file = fs.open(path)
                         except Exception:
@@ -176,10 +196,7 @@ def analyze_raw_image(file_bytes: bytes, top_n: int = 10) -> Dict:
 
                     size, sha256_hex = _hash_file(tsk_file)
 
-                    # Times (may be None depending on FS)
-                    ctime = None
-                    mtime = None
-                    atime = None
+                    ctime = mtime = atime = None
                     try:
                         meta = tsk_file.info.meta
                         ctime = int(getattr(meta, "crtime", 0) or 0) or None
@@ -198,17 +215,32 @@ def analyze_raw_image(file_bytes: bytes, top_n: int = 10) -> Dict:
                     )
                     records.append(rec)
 
-                    # Suspicious extension tracking
                     _, ext = os.path.splitext(rec.path.lower())
                     if ext in _SUSPICIOUS_EXTENSIONS:
                         suspicious_names.append(os.path.basename(rec.path))
 
                     if sha256_hex:
                         all_hashes.append({"name": rec.path, "sha256": sha256_hex})
+
             except Exception as exc:
                 logger.debug("Traversal failed on %s: %s", mount_label, exc)
                 continue
 
+    finally:
+        # 5) Cleanup temp file
+        try:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except Exception:
+                    pass
+            if tmp_path:
+                os.remove(tmp_path)
+        except Exception:
+            # don't fail just because cleanup couldn't delete
+            pass
+
+    # 6) Build timeline + summary
     timeline = [
         {
             "path": r.path,
@@ -228,7 +260,6 @@ def analyze_raw_image(file_bytes: bytes, top_n: int = 10) -> Dict:
         )
     )
 
-    # Prepare summary
     records.sort(key=lambda r: r.size, reverse=True)
     top_records = records[:top_n]
     summary = {
@@ -241,5 +272,6 @@ def analyze_raw_image(file_bytes: bytes, top_n: int = 10) -> Dict:
         "timeline": timeline,
     }
     return summary
+
 
 

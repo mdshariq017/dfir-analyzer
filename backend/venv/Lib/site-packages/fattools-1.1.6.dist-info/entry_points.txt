@@ -1,0 +1,2 @@
+[console_scripts]
+fattools = FATtools.scripts.main:main
