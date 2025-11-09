@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 
 import joblib
 import numpy as np
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -187,3 +188,141 @@ def score_file(file_bytes: bytes, filename: str) -> int:
 def compute_sha256(file_bytes: bytes) -> str:
     """Return SHA256 hash of file bytes (hex string)."""
     return hashlib.sha256(file_bytes).hexdigest()
+
+
+# -----------------------------
+# Optional helper: score raw bytes directly
+# -----------------------------
+
+def score_bytes(data: bytes, filename: str) -> float:
+    """Return 0-100 risk score for raw bytes using the loaded model."""
+    global _MODEL
+    if _MODEL is None:
+        initialize_model()
+    if _MODEL is None:
+        raise RuntimeError("Risk model not loaded. Run train_model.py first.")
+
+    feats = extract_features(data, filename)
+    # keep deterministic order using FEATURE_NAMES
+    X = _features_to_array(feats)
+    try:
+        prob = _MODEL.predict_proba(X)[0][1]  # type: ignore
+        return round(float(prob) * 100.0, 2)
+    except Exception:
+        # fallback to main scorer to preserve behavior
+        return float(score_file(data, filename))
+
+
+# -----------------------------
+# Content-aware postprocess caps for benign common formats
+# -----------------------------
+
+_PDF_JS_PATTERNS = [b"/JavaScript", b"/JS", b"AA ", b"OpenAction", b"/Action", b"/Launch"]
+_MS_MACRO_PATTERNS = [b"PK", b"vbaProject.bin", b"macro", b"AutoOpen", b"ALT+F11"]
+
+
+def _looks_pdf_without_scripts(data: bytes) -> bool:
+    # crude but reliable: starts with %PDF and lacks common JS/action markers
+    if not data.startswith(b"%PDF"):
+        return False
+    for p in _PDF_JS_PATTERNS:
+        if p in data:
+            return False
+    return True
+
+
+def _looks_office_zip_without_macros(data: bytes, filename: str) -> bool:
+    # OOXML: starts with PK (zip), extension in docx/xlsx/pptx, and no macro hints
+    low = filename.lower()
+    if not (low.endswith(".docx") or low.endswith(".xlsx") or low.endswith(".pptx")):
+        return False
+    if not data.startswith(b"PK"):
+        return False
+    for p in _MS_MACRO_PATTERNS:
+        if p in data:
+            return False
+    return True
+
+
+def postprocess_content_aware(raw_score: float, data: bytes, filename: str) -> float:
+    """Cap or adjust risk for common benign formats unless explicit red flags exist."""
+    low = filename.lower()
+    score = float(raw_score)
+    try:
+        head = data[:256_000]
+        if low.endswith(".pdf") and _looks_pdf_without_scripts(head):
+            score = min(score, 30.0)
+        if (low.endswith(".docx") or low.endswith(".xlsx") or low.endswith(".pptx")) and _looks_office_zip_without_macros(head, low):
+            score = min(score, 30.0)
+    except Exception:
+        pass
+    return round(score, 2)
+
+# --- Compatibility: expose a bytes-scoring helper used by main/forensics ---
+def score_bytes(file_bytes: bytes, filename: str) -> int:
+    """
+    Convenience wrapper to score a memory buffer (without touching disk).
+    """
+    return score_file(file_bytes, filename)
+
+# --- Content-aware post-processor to clamp/adjust risky/benign types ---
+def postprocess_content_aware(raw_score: float, file_bytes: bytes, filename: str) -> float:
+    """
+    Adjust the model score using lightweight content heuristics to reduce false positives.
+    - Clamp very low-risk docs (PDF/TXT) unless they show malware markers.
+    - Nudge up if obvious PE header or macro/PowerShell artifacts are present.
+    Returns a 0–100 float.
+    """
+    import re
+    name = (filename or "").lower()
+
+    # Quick text scan (first 256 KB)
+    try:
+        text = file_bytes[:256_000].decode(errors="ignore")
+    except Exception:
+        text = ""
+
+    # Signals
+    pe = (file_bytes[:2] == b"MZ")
+    macro = re.search(r"\b(AutoOpen|Document_Open|AutoExec|ThisDocument)\b", text, re.I) is not None
+    pwsh = re.search(r"\b(powershell|EncodedCommand|FromBase64String|Invoke-Mimikatz)\b", text, re.I) is not None
+    url = re.search(r"https?://", text, re.I) is not None
+    b64 = re.search(r"[A-Za-z0-9+/]{40,}={0,2}", text) is not None
+
+    score = float(raw_score)
+
+    # Nudge up for clear malware-ish artifacts
+    if pe: score = max(score, 65.0)
+    if macro or pwsh: score = max(score, 55.0)
+    if url and b64: score = max(score, 45.0)
+
+    # Clamp common benign types unless malicious signals present
+    benignish = name.endswith((".pdf", ".txt", ".csv", ".json"))
+    if benignish and not (pe or macro or pwsh):
+        score = min(score, 40.0)
+
+    return max(0.0, min(100.0, score))
+
+# Appended compatibility helpers (as requested)
+def score_bytes(file_bytes: bytes, filename: str) -> int:
+    return score_file(file_bytes, filename)
+
+def postprocess_content_aware(raw_score: float, file_bytes: bytes, filename: str) -> float:
+    import re
+    name = (filename or "").lower()
+    try:
+        text = file_bytes[:256_000].decode(errors="ignore")
+    except Exception:
+        text = ""
+    pe = (file_bytes[:2] == b"MZ")
+    macro = re.search(r"\b(AutoOpen|Document_Open|AutoExec|ThisDocument)\b", text, re.I) is not None
+    pwsh = re.search(r"\b(powershell|EncodedCommand|FromBase64String|Invoke-Mimikatz)\b", text, re.I) is not None
+    url = re.search(r"https?://", text, re.I) is not None
+    b64 = re.search(r"[A-Za-z0-9+/]{40,}={0,2}", text) is not None
+    score = float(raw_score)
+    if pe: score = max(score, 65.0)
+    if macro or pwsh: score = max(score, 55.0)
+    if url and b64: score = max(score, 45.0)
+    if name.endswith((".pdf", ".txt", ".csv", ".json")) and not (pe or macro or pwsh):
+        score = min(score, 40.0)
+    return max(0.0, min(100.0, score))
