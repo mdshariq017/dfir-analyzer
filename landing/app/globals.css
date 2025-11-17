@@ -1,12 +1,13 @@
 @import "tailwindcss";
- 
 
-/* Body */
+/* Body - match landing background without using @apply */
 body {
-  @apply bg-gray-900 text-white antialiased;
+  background-color: #0f1224;
+  color: #ffffff;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Custom Scrollbar */
+/* Custom Scrollbar - Purple theme */
 .scroll-custom::-webkit-scrollbar {
   width: 8px;
 }
@@ -15,11 +16,26 @@ body {
   border-radius: 4px;
 }
 .scroll-custom::-webkit-scrollbar-thumb {
-  background-color: #a855f7;
+  background-color: #9b7bff;
   border-radius: 4px;
   border: 2px solid #1f1c2e;
 }
 .scroll-custom::-webkit-scrollbar-thumb:hover {
-  background-color: #d8b4fe;
+  background-color: #b89fff;
 }
- 
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Selection colors */
+::selection {
+  background-color: #6c63ff;
+  color: white;
+}
+
+::-moz-selection {
+  background-color: #6c63ff;
+  color: white;
+}

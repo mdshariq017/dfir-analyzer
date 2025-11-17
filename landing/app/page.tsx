@@ -3,13 +3,13 @@ import Nav from "./components/Nav"
 import Hero from "./components/Hero";
 import Features from "./components/Features";
 import Footer from "./components/Footer";
-import Defense from "./components/Defense";
+import Defense from "./components/Defense"; // renamed from Defense
 import Info from "./components/Info";
 import Contact from "./components/Contact";
 
 export default function Page() {
   return (
-    <div className="min-h-screen bg-[#030016] text-white antialiased">
+    <div className="min-h-screen bg-[#0f1224] text-white antialiased">
       <Nav/>
       <main>
         <Hero/>
@@ -19,7 +19,6 @@ export default function Page() {
         <Contact/>
       </main>
       <Footer/>
-
     </div>
   );
 }

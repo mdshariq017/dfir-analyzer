@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import axios from "axios";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import {
   ResponsiveContainer,
   PieChart,
@@ -15,7 +15,9 @@ import {
   Legend,
 } from "recharts";
 import jsPDF from "jspdf";
+import Header from "./Header";
 import html2canvas from "html2canvas";
+
 import "./App.css";
 
 // Attach JWT automatically
@@ -27,6 +29,7 @@ axios.interceptors.request.use((config) => {
 
 function App() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [token, setToken] = useState(localStorage.getItem("token"));
   const isGuest = !token || token.trim() === "";
   const [name, setName] = useState(localStorage.getItem("name") || "Guest");
@@ -312,60 +315,18 @@ function App() {
 
   return (
     <div className="app app-wide">
+    
+  
+
       {/* Top bar */}
-      <div className="topbar">
-        <div>
-          <h1 className="app-title">DFIR Analyzer</h1>
-        </div>
-        <div className="topbar-right">
-          <span className="welcome-text">Welcome, {name}</span>
-
-          <div className="avatar-wrap" ref={avatarRef} tabIndex={0}>
-            <button className="avatar-btn" onClick={() => setMenuOpen(v => !v)}>
-              {token ? (
-                (name?.[0] || "U").toString().toUpperCase()
-              ) : (
-                <img src="/login.png" alt="Login" className="login-icon" />
-              )}
-            </button>
-
-            {menuOpen && (
-              <div className="avatar-menu">
-                {!token ? (
-                  <>
-                    <Link
-                      to="/signup"
-                      onMouseDown={(e) => e.preventDefault()} // prevent blur before click
-                      onClick={() => setMenuOpen(false)}     // close menu after nav
-                    >
-                      Sign up
-                    </Link>
-                    <Link
-                      to="/login"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      Log in
-                    </Link>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setMenuOpen(false);
-                        logout();
-                      }}
-                    >
-                      Logout
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      {location.pathname !== "/" && <Header
+        name={name}
+        token={token}
+        menuOpen={menuOpen}
+        setMenuOpen={setMenuOpen}
+        avatarRef={avatarRef}
+        logout={logout}
+      />}
 
       {/* ===== Header Row: KPIs (left) + Upload (right) ===== */}
       <div className="header-row">
@@ -378,7 +339,9 @@ function App() {
             <div className="metric-title">Avg. Risk Score</div>
             <div className="metric-row">
               <div className="metric-value">{avgRiskScore.toFixed(1)}</div>
-              <span className={`badge badge-${riskBand.toLowerCase()}`}>{riskBand}</span>
+              <span className={`badge badge-${riskBand.toLowerCase()}`}>
+                {riskBand}
+              </span>
             </div>
           </div>
           <div className="metric-card">
@@ -391,7 +354,8 @@ function App() {
         <div>
           {isGuest && (
             <div className="guest-banner" role="note" aria-live="polite">
-              You're in <strong>guest mode</strong> - try analyzing a file to preview results.
+              You're in <strong>guest mode</strong> - try analyzing a file to
+              preview results.
               <span className="cta" onClick={() => navigate("/signup")}>
                 Sign up or log in
               </span>{" "}
@@ -467,7 +431,9 @@ function App() {
                       verticalAlign="middle"
                       align="right"
                       layout="vertical"
-                      formatter={(value) => <span style={{ color: "#c7c7d2" }}>{value}</span>}
+                      formatter={(value) => (
+                        <span style={{ color: "#c7c7d2" }}>{value}</span>
+                      )}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -478,14 +444,25 @@ function App() {
               <div className="card-title">Scan History</div>
               <div className="chart-wrapper">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={scanHistoryData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
-                    <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+                  <LineChart
+                    data={scanHistoryData}
+                    margin={{ top: 10, right: 20, bottom: 10, left: 0 }}
+                  >
+                    <CartesianGrid
+                      stroke="rgba(255,255,255,0.08)"
+                      vertical={false}
+                    />
                     <XAxis
                       dataKey="time"
                       stroke="#8b8b9b"
                       tickLine={false}
                       axisLine={false}
-                      label={{ value: "Time", position: "insideBottom", dy: 10, fill: "#8b8b9b" }}
+                      label={{
+                        value: "Time",
+                        position: "insideBottom",
+                        dy: 10,
+                        fill: "#8b8b9b",
+                      }}
                     />
                     <YAxis stroke="#8b8b9b" tickLine={false} axisLine={false} />
                     <Tooltip
@@ -495,7 +472,14 @@ function App() {
                         borderRadius: 8,
                       }}
                     />
-                    <Line type="monotone" dataKey="scans" stroke="#9b7bff" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
+                    <Line
+                      type="monotone"
+                      dataKey="scans"
+                      stroke="#9b7bff"
+                      strokeWidth={3}
+                      dot={false}
+                      activeDot={{ r: 6 }}
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -547,7 +531,11 @@ function App() {
                     className="upload-btn"
                     onClick={() => setAnalysis(null)}
                     disabled={!hasAnalysis}
-                    title={hasAnalysis ? "Start a new analysis" : "Upload a file first"}
+                    title={
+                      hasAnalysis
+                        ? "Start a new analysis"
+                        : "Upload a file first"
+                    }
                   >
                     New Analysis
                   </button>
@@ -561,12 +549,17 @@ function App() {
             <div className="panel-section">
               <div className="panel-item">
                 <span className="result-label">Original filename</span>
-                <span className="result-value">{analysis?.originalFilename || "Not uploaded"}</span>
+                <span className="result-value">
+                  {analysis?.originalFilename || "Not uploaded"}
+                </span>
               </div>
 
               <div className="panel-item">
                 <span className="result-label">Stored filename</span>
-                <span className="result-value" style={{ fontFamily: "monospace" }}>
+                <span
+                  className="result-value"
+                  style={{ fontFamily: "monospace" }}
+                >
                   {analysis?.storedFilename || "-"}
                 </span>
               </div>
@@ -578,7 +571,10 @@ function App() {
                 </span>
               </div>
 
-              <div className="panel-item" style={{ alignItems: "flex-start", gap: "0.5rem" }}>
+              <div
+                className="panel-item"
+                style={{ alignItems: "flex-start", gap: "0.5rem" }}
+              >
                 <span className="result-label">SHA256</span>
                 <span className="hash-field">
                   <span className="code-select">{analysis?.sha256 || "-"}</span>
@@ -597,7 +593,13 @@ function App() {
                 <span className="result-label">Risk score</span>
                 <span>
                   {analysis ? (
-                    <span className={`score-bubble score-${getRiskBand(analysis.score)}`}>{analysis.score}</span>
+                    <span
+                      className={`score-bubble score-${getRiskBand(
+                        analysis.score
+                      )}`}
+                    >
+                      {analysis.score}
+                    </span>
                   ) : (
                     <span className="score-bubble score-disabled">-</span>
                   )}
@@ -606,7 +608,10 @@ function App() {
             </div>
 
             <div className="panel-section">
-              <div className="card-title" style={{ marginLeft: 0, marginBottom: "0.5rem" }}>
+              <div
+                className="card-title"
+                style={{ marginLeft: 0, marginBottom: "0.5rem" }}
+              >
                 Recommendations
               </div>
               <p className="recommendation-text">
@@ -617,35 +622,58 @@ function App() {
             </div>
             {analysis?.timeline?.length ? (
               <div className="panel-section">
-                <div className="card-title" style={{ marginLeft: 0, marginBottom: ".5rem" }}>
+                <div
+                  className="card-title"
+                  style={{ marginLeft: 0, marginBottom: ".5rem" }}
+                >
                   File Timeline (by mtime)
                 </div>
                 <div style={{ width: "100%", height: 220 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={buildTimelineData(analysis.timeline)} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
-                      <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
+                    <LineChart
+                      data={buildTimelineData(analysis.timeline)}
+                      margin={{ top: 10, right: 20, bottom: 10, left: 0 }}
+                    >
+                      <CartesianGrid
+                        stroke="rgba(255,255,255,0.08)"
+                        vertical={false}
+                      />
                       <XAxis
                         dataKey="idx"
                         stroke="#8b8b9b"
                         tickLine={false}
                         axisLine={false}
-                        label={{ value: "Recent files", position: "insideBottom", dy: 10, fill: "#8b8b9b" }}
+                        label={{
+                          value: "Recent files",
+                          position: "insideBottom",
+                          dy: 10,
+                          fill: "#8b8b9b",
+                        }}
                       />
                       <YAxis
                         dataKey="sizeKB"
                         stroke="#8b8b9b"
                         tickLine={false}
                         axisLine={false}
-                        label={{ value: "Size (KB)", angle: -90, position: "insideLeft", dx: -5, fill: "#8b8b9b" }}
+                        label={{
+                          value: "Size (KB)",
+                          angle: -90,
+                          position: "insideLeft",
+                          dx: -5,
+                          fill: "#8b8b9b",
+                        }}
                       />
                       <Tooltip
                         formatter={(value, name, props) => {
-                          if (name === "sizeKB") return [`${value.toFixed(1)} KB`, "Size"];
+                          if (name === "sizeKB")
+                            return [`${value.toFixed(1)} KB`, "Size"];
                           return [value, name];
                         }}
                         labelFormatter={(idx) => {
                           const d = buildTimelineData(analysis.timeline)[idx];
-                          return d ? `${d.label} � ${formatDateTime(d.mtime)}` : "";
+                          return d
+                            ? `${d.label} � ${formatDateTime(d.mtime)}`
+                            : "";
                         }}
                         contentStyle={{
                           background: "rgba(20,20,40,0.9)",
@@ -653,16 +681,28 @@ function App() {
                           borderRadius: 8,
                         }}
                       />
-                      <Line type="monotone" dataKey="sizeKB" stroke="#9b7bff" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
+                      <Line
+                        type="monotone"
+                        dataKey="sizeKB"
+                        stroke="#9b7bff"
+                        strokeWidth={3}
+                        dot={false}
+                        activeDot={{ r: 6 }}
+                      />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
-                <div style={{ color: "#a0a0b4", fontSize: ".85rem", marginTop: ".5rem" }}>
+                <div
+                  style={{
+                    color: "#a0a0b4",
+                    fontSize: ".85rem",
+                    marginTop: ".5rem",
+                  }}
+                >
                   Showing up to 30 most recently modified files.
                 </div>
               </div>
             ) : null}
-
           </div>
         </aside>
       </div>
