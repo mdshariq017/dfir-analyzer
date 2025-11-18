@@ -134,6 +134,15 @@ function App() {
   const hiddenFileInputRef = useRef(null);
   const analysisRef = useRef(null); // for PDF export
 
+  useEffect(() => {
+    if (location.pathname === "/guest") {
+      localStorage.removeItem("token");
+      localStorage.removeItem("name");
+      setToken(null);
+      setName("Guest");
+    }
+  }, [location.pathname]);
+
   // ----- Helpers -----
   const triggerFilePicker = () => hiddenFileInputRef.current?.click();
 

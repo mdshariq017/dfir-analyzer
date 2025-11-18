@@ -4,22 +4,22 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import "./index.css";
 
 import App from "./App.jsx"; // dashboard
-import Signup from "./Signup.jsx";
 import Login from "./Login.jsx";
+import Signup from "./Signup.jsx";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <BrowserRouter>
       <Routes>
-        {/* Root goes to Login */}
         <Route path="/" element={<Login />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
 
-        {/* Dashboard */}
+        {/* Logged-in dashboard */}
         <Route path="/dashboard" element={<App />} />
 
-        {/* Auth pages */}
-        <Route path="/signup" element={<Signup />} />
-        <Route path="/login" element={<Login />} />
+        {/* Guest/demo dashboard */}
+        <Route path="/guest" element={<App />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>
