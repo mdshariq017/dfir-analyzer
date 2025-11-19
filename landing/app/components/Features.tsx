@@ -7,15 +7,34 @@ import { VscWorkspaceTrusted } from 'react-icons/vsc';
 import { VscSourceControl } from 'react-icons/vsc';
 import { AiOutlineCompress } from 'react-icons/ai';
 import { PiEscalatorUpThin } from 'react-icons/pi';
+import BlurText from './BlurText';
 
 export default function Features() {
+  const handleAnimationComplete = () => {
+    console.log('Heading animation completed!');
+  };
+
   return (
     <section className="relative py-0 pb-20 text-center bg-[#0f1224]">
 
       <div className="relative z-20 mb-12">
-        <h1 className="text-5xl md:text-6xl font-bold text-white">
-          Advanced <span className="text-purple-400">Forensic Analysis</span>
-        </h1>
+        <div className="flex flex-wrap justify-center gap-3">
+          <BlurText
+            text="Advanced"
+            delay={50}
+            animateBy="words"
+            direction="top"
+            className="text-5xl md:text-6xl font-bold text-white"
+          />
+          <BlurText
+            text="Forensic Analysis"
+            delay={50}
+            animateBy="words"
+            direction="top"
+            onAnimationComplete={handleAnimationComplete}
+            className="text-5xl md:text-6xl font-bold text-purple-400"
+          />
+        </div>
         <p className="text-gray-400 mt-4 text-lg">
           AI-powered digital forensics and incident response tools for modern investigations.
         </p>

@@ -55,7 +55,7 @@ const Footer = () => {
       </div>
 
       {/* Newsletter */}
-      <div className="mt-12 max-w-2xl mx-auto px-6 text-center">
+      {/* <div className="mt-12 max-w-2xl mx-auto px-6 text-center">
         <h4 className="text-xl font-semibold text-white mb-4">Stay Updated</h4>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
           <input 
@@ -67,7 +67,7 @@ const Footer = () => {
             Subscribe
           </button>
         </div>
-      </div>
+      </div> */}
 
       {/* Bottom */}
       <div className="mt-12 border-t border-gray-700 pt-6 text-center text-gray-500 text-sm">
