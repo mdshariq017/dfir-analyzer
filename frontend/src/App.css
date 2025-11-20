@@ -1114,3 +1114,131 @@ button[aria-disabled="true"] {
   .brand-logo { font-size: 0.98rem; }
   .nav-link { padding: .35rem .5rem; font-size: .95rem; }
 }
+
+/* URL Form Styling */
+.url-form {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.url-input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: #1a1d35;
+  border: 1px solid rgba(139, 123, 255, 0.2);
+  border-radius: 0.5rem;
+  color: white;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+}
+
+.url-input:focus {
+  outline: none;
+  border-color: rgba(139, 123, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(139, 123, 255, 0.1);
+}
+
+.url-input::placeholder {
+  color: #6b7280;
+}
+
+/* URL Result Display */
+.url-result {
+  padding: 1rem;
+  background: #1a1d35;
+  border: 1px solid rgba(139, 123, 255, 0.1);
+  border-radius: 0.75rem;
+  margin-top: 1rem;
+}
+
+.url-risk-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.url-category {
+  font-size: 0.875rem;
+  color: #9ca3af;
+  margin-top: 0.5rem;
+}
+
+.url-threat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.url-threat-grid > div {
+  text-align: center;
+}
+
+.url-recommendations {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.url-recommendations ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+
+.url-recommendations li {
+  padding: 0.5rem 0;
+  font-size: 0.875rem;
+  color: #d1d5db;
+}
+
+/* Toast Error Variant */
+.toast-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+}
+
+/* Badge Variants for Risk Levels */
+.badge-low {
+  background: rgba(34, 197, 148, 0.1);
+  border-color: rgba(34, 197, 148, 0.3);
+  color: #6ee7b7;
+}
+
+.badge-medium {
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.3);
+  color: #fde68a;
+}
+
+/* Fade-in animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+  .url-form {
+    flex-direction: column;
+  }
+
+  .url-threat-grid {
+    grid-template-columns: 1fr;
+  }
+}

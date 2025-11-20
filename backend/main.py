@@ -15,6 +15,13 @@ from typing import Dict, Any, Optional, Tuple, Iterable, Union
 from collections import OrderedDict
 from pymongo import MongoClient
 import jwt
+from pydantic import BaseModel
+import httpx
+import socket
+import ssl
+import re
+from math import log2
+from datetime import datetime
 
 # Load environment variables from .env (if present)
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
@@ -560,6 +567,399 @@ def export_csv(sha256: str):
         "Content-Disposition": f'attachment; filename="{filename}"'
     }
     return Response(content=csv_text, media_type="text/csv", headers=headers)
+
+# ---------------------------
+# URL Forensic Profiler (no DB persistence, analysis only)
+# ---------------------------
+class UrlSignal(BaseModel):
+    type: str            # "structure", "content", "behavior", "infrastructure", "social_engineering"
+    severity: str        # "info", "low", "medium", "high", "critical"
+    description: str
+    evidence: str | None = None
+    remediation: str | None = None
+
+class CertificateInfo(BaseModel):
+    issuer: str | None = None
+    valid_from: str | None = None
+    valid_until: str | None = None
+    is_self_signed: bool = False
+    days_until_expiry: int | None = None
+
+class DNSInfo(BaseModel):
+    ip_addresses: list[str] = []
+    is_cloudflare: bool = False
+    is_aws: bool = False
+    has_multiple_ips: bool = False
+
+class UrlProfile(BaseModel):
+    scheme: str
+    host: str
+    tld: str | None
+    path: str
+    query_length: int
+    url_length: int
+    subdomain_count: int
+    has_ip_host: bool
+    certificate: CertificateInfo | None = None
+    dns: DNSInfo | None = None
+    entropy: float
+
+class ThreatIntelligence(BaseModel):
+    phishing_likelihood: int
+    malware_likelihood: int
+    social_engineering_score: int
+    infrastructure_risk: int
+
+class UrlAnalysisResponse(BaseModel):
+    url: str
+    timestamp: str
+    risk_score: int
+    risk_category: str
+    threat_intel: ThreatIntelligence
+    profile: UrlProfile
+    signals: list[UrlSignal]
+    recommendations: list[str]
+
+SUSPICIOUS_TLDS = {
+    "xyz", "top", "gq", "tk", "ml", "ga", "cf", "cn", "ru", "work", "zip",
+    "click", "info", "pw", "cc", "ws", "biz", "name"
+}
+
+BRAND_IMPERSONATION_KEYWORDS = [
+    "paypal", "amazon", "microsoft", "apple", "google", "facebook", "instagram",
+    "netflix", "ebay", "wellsfargo", "chase", "bankofamerica", "dhl", "fedex"
+]
+
+SOCIAL_ENGINEERING_PHRASES = [
+    "verify your account", "unusual activity", "suspended account",
+    "confirm your identity", "reset password", "update payment",
+    "limited time", "act now", "urgent", "security alert", "click here"
+]
+
+EXECUTABLE_EXTENSIONS = [
+    ".exe", ".msi", ".bat", ".cmd", ".js", ".vbs", ".ps1", ".scr",
+    ".zip", ".rar", ".7z", ".apk", ".dmg", ".pkg"
+]
+
+CLOUDFLARE_IPS = ["104.16.", "104.17.", "104.18.", "104.19.", "172.64.", "172.65."]
+AWS_IPS = ["3.", "13.", "18.", "34.", "35.", "52.", "54."]
+
+def calculate_entropy(text: str) -> float:
+    if not text:
+        return 0.0
+    freq: dict[str, int] = {}
+    for ch in text:
+        freq[ch] = freq.get(ch, 0) + 1
+    entropy = 0.0
+    length = len(text)
+    for count in freq.values():
+        p = count / length
+        entropy -= p * log2(p)
+    return round(entropy, 2)
+
+def check_certificate(hostname: str) -> CertificateInfo:
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((hostname, 443), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+        issuer = dict(x[0] for x in cert.get("issuer", []))
+        subject = dict(x[0] for x in cert.get("subject", []))
+        valid_from = cert.get("notBefore")
+        valid_until = cert.get("notAfter")
+        is_self_signed = issuer.get("organizationName") == subject.get("organizationName")
+        days_until_expiry = None
+        if valid_until:
+            try:
+                expiry_date = datetime.strptime(valid_until, "%b %d %H:%M:%S %Y %Z")
+                days_until_expiry = (expiry_date - datetime.utcnow()).days
+            except Exception:
+                days_until_expiry = None
+        return CertificateInfo(
+            issuer=issuer.get("organizationName"),
+            valid_from=valid_from,
+            valid_until=valid_until,
+            is_self_signed=is_self_signed,
+            days_until_expiry=days_until_expiry,
+        )
+    except Exception:
+        return CertificateInfo()
+
+def check_dns(hostname: str) -> DNSInfo:
+    try:
+        ip_addresses = socket.gethostbyname_ex(hostname)[2]
+        is_cloudflare = any(any(ip.startswith(cf) for cf in CLOUDFLARE_IPS) for ip in ip_addresses)
+        is_aws = any(any(ip.startswith(aws) for aws in AWS_IPS) for ip in ip_addresses)
+        return DNSInfo(
+            ip_addresses=ip_addresses,
+            is_cloudflare=is_cloudflare,
+            is_aws=is_aws,
+            has_multiple_ips=len(ip_addresses) > 1,
+        )
+    except Exception:
+        return DNSInfo()
+
+def compute_url_profile(url: str) -> UrlProfile:
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    path = parsed.path or ""
+    query = parsed.query or ""
+    ip_match = re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host)
+    tld = host.split(".")[-1].lower() if "." in host else None
+    subdomain_count = host.count(".") - 1 if "." in host else 0
+    entropy = calculate_entropy(host + path + query)
+    cert_info = None
+    if parsed.scheme == "https" and not ip_match:
+        cert_info = check_certificate(host)
+    dns_info = check_dns(host) if not ip_match else None
+    return UrlProfile(
+        scheme=parsed.scheme,
+        host=host,
+        tld=tld,
+        path=path,
+        query_length=len(query),
+        url_length=len(url),
+        subdomain_count=max(subdomain_count, 0),
+        has_ip_host=bool(ip_match),
+        certificate=cert_info,
+        dns=dns_info,
+        entropy=entropy,
+    )
+
+def analyze_threats(url: str, html: str | None, profile: UrlProfile, redirects: int) -> tuple[ThreatIntelligence, list[UrlSignal], list[str]]:
+    signals: list[UrlSignal] = []
+    recommendations: list[str] = []
+    phishing_score = 0
+    malware_score = 0
+    social_eng_score = 0
+    infra_score = 0
+
+    # Infrastructure: certificate
+    if profile.certificate:
+        if profile.certificate.is_self_signed:
+            infra_score += 35
+            signals.append(UrlSignal(
+                type="infrastructure",
+                severity="high",
+                description="Self-signed SSL certificate detected",
+                evidence="Certificate issuer matches subject",
+                remediation="Legitimate sites use trusted certificate authorities",
+            ))
+        if profile.certificate.days_until_expiry is not None and profile.certificate.days_until_expiry < 30:
+            infra_score += 15
+            signals.append(UrlSignal(
+                type="infrastructure",
+                severity="medium",
+                description=f"SSL certificate expires in {profile.certificate.days_until_expiry} days",
+                evidence=f"Expires: {profile.certificate.valid_until}",
+            ))
+
+    # IP host
+    if profile.has_ip_host:
+        infra_score += 40
+        phishing_score += 30
+        signals.append(UrlSignal(
+            type="infrastructure",
+            severity="critical",
+            description="URL uses raw IP address instead of domain name",
+            evidence=f"IP: {profile.host}",
+            remediation="Legitimate sites typically use domain names, not raw IPs",
+        ))
+        recommendations.append("Avoid clicking links that use raw IP addresses.")
+
+    # Suspicious TLD
+    if profile.tld in SUSPICIOUS_TLDS:
+        phishing_score += 20
+        signals.append(UrlSignal(
+            type="structure",
+            severity="medium",
+            description=f"Suspicious top-level domain: .{profile.tld}",
+            evidence=f"TLD '.{profile.tld}' is frequently seen in phishing.",
+        ))
+
+    # High entropy
+    if profile.entropy > 4.5:
+        malware_score += 25
+        signals.append(UrlSignal(
+            type="structure",
+            severity="medium",
+            description="High URL randomness detected",
+            evidence=f"Entropy: {profile.entropy}/5.0",
+            remediation="Random-looking URLs are common in malicious infrastructure.",
+        ))
+
+    url_lower = url.lower()
+    for brand in BRAND_IMPERSONATION_KEYWORDS:
+        if brand in url_lower and brand not in (profile.host or "").split(".")[0]:
+            phishing_score += 35
+            social_eng_score += 30
+            signals.append(UrlSignal(
+                type="social_engineering",
+                severity="high",
+                description=f"Possible {brand.capitalize()} brand impersonation",
+                evidence=f"URL contains '{brand}' but host is not the official domain.",
+                remediation=f"Manually verify that this is really {brand.capitalize()}'s official site.",
+            ))
+            recommendations.append(f"Verify this is the official {brand.capitalize()} domain.")
+            break
+
+    # Content analysis
+    if html:
+        lowered = html.lower()
+        found_phrases = [p for p in SOCIAL_ENGINEERING_PHRASES if p in lowered]
+        if found_phrases:
+            social_eng_score += 15 * len(found_phrases)
+            signals.append(UrlSignal(
+                type="social_engineering",
+                severity="high",
+                description="Social engineering language detected",
+                evidence=f"Found phrases: {', '.join(found_phrases[:3])}",
+                remediation="Urgent language is a common phishing tactic.",
+            ))
+
+        if "<form" in lowered and "password" in lowered:
+            phishing_score += 35
+            signals.append(UrlSignal(
+                type="content",
+                severity="critical",
+                description="Password form detected",
+                evidence="Page includes a password input form.",
+                remediation="Do not enter credentials unless you fully trust the site.",
+            ))
+            recommendations.append("Avoid entering credentials on this page.")
+
+        iframe_count = len(re.findall(r"<iframe", lowered))
+        if iframe_count > 0:
+            malware_score += 15
+            signals.append(UrlSignal(
+                type="behavior",
+                severity="medium",
+                description=f"Page uses {iframe_count} iframe(s)",
+                evidence="Iframes can load third-party or hidden content.",
+            ))
+
+        script_content = " ".join(re.findall(r"<script[^>]*>(.*?)</script>", lowered, re.DOTALL))
+        if "eval(" in script_content or "unescape(" in script_content or "fromcharcode" in script_content:
+            malware_score += 30
+            signals.append(UrlSignal(
+                type="behavior",
+                severity="high",
+                description="JavaScript obfuscation detected",
+                evidence="Use of eval/unescape/fromCharCode in scripts.",
+                remediation="Obfuscated JavaScript is common in malicious pages.",
+            ))
+
+        script_count = len(re.findall(r"<script\b", lowered))
+        if script_count > 80:
+            malware_score += 20
+            signals.append(UrlSignal(
+                type="behavior",
+                severity="medium",
+                description=f"Extremely script-heavy page ({script_count} scripts)",
+                evidence="Large number of script tags present.",
+            ))
+
+    # Redirect chains
+    if redirects >= 3:
+        malware_score += 25
+        signals.append(UrlSignal(
+            type="behavior",
+            severity="high",
+            description=f"Multiple redirects detected ({redirects} hops)",
+            evidence="Redirect chains can hide the final destination.",
+            remediation="Be cautious with URLs that redirect multiple times.",
+        ))
+        recommendations.append("Investigate URLs with long redirect chains carefully.")
+
+    # Executable downloads
+    for ext in EXECUTABLE_EXTENSIONS:
+        if ext in (profile.path or "").lower():
+            malware_score += 45
+            signals.append(UrlSignal(
+                type="behavior",
+                severity="critical",
+                description=f"Direct link to executable or archive ({ext})",
+                evidence=f"URL path points to a '{ext}' file.",
+                remediation="Only download executables from trusted sources.",
+            ))
+            recommendations.append(f"Avoid downloading this {ext} file unless fully trusted.")
+            break
+
+    phishing_score = min(phishing_score, 100)
+    malware_score = min(malware_score, 100)
+    social_eng_score = min(social_eng_score, 100)
+    infra_score = min(infra_score, 100)
+
+    threat_intel = ThreatIntelligence(
+        phishing_likelihood=phishing_score,
+        malware_likelihood=malware_score,
+        social_engineering_score=social_eng_score,
+        infrastructure_risk=infra_score,
+    )
+
+    if not recommendations:
+        recommendations.append("Verify the URL manually before entering sensitive information.")
+
+    return threat_intel, signals, recommendations
+
+class UrlRequest(BaseModel):
+    url: str
+
+@app.post("/api/url/analyze", response_model=UrlAnalysisResponse)
+async def analyze_url(req: UrlRequest):
+    url = req.url.strip()
+    if not url or not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Invalid URL format. Include http:// or https://")
+
+    profile = compute_url_profile(url)
+
+    html: str | None = None
+    redirects = 0
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=10) as client:
+            current = url
+            for _ in range(5):
+                resp = await client.get(current, headers={"User-Agent": "DFIR-Analyzer/1.0"})
+                if 300 <= resp.status_code < 400 and "location" in resp.headers:
+                    redirects += 1
+                    current = resp.headers["location"]
+                else:
+                    html = resp.text
+                    break
+    except Exception:
+        html = None
+
+    threat_intel, signals, recommendations = analyze_threats(url, html, profile, redirects)
+
+    risk_score = int(
+        threat_intel.phishing_likelihood * 0.35
+        + threat_intel.malware_likelihood * 0.30
+        + threat_intel.social_engineering_score * 0.20
+        + threat_intel.infrastructure_risk * 0.15
+    )
+
+    if risk_score < 20:
+        category = "Low Risk - Likely Legitimate"
+    elif risk_score < 40:
+        category = "Moderate - Verify Before Proceeding"
+    elif risk_score < 60:
+        category = "High Risk - Potential Phishing"
+    elif risk_score < 80:
+        category = "Critical - Likely Malicious"
+    else:
+        category = "Extreme Threat - Avoid Completely"
+
+    return UrlAnalysisResponse(
+        url=url,
+        timestamp=datetime.utcnow().isoformat() + "Z",
+        risk_score=risk_score,
+        risk_category=category,
+        threat_intel=threat_intel,
+        profile=profile,
+        signals=signals,
+        recommendations=recommendations,
+    )
 
 # ---------------------------
 # History & Stats

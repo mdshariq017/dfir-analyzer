@@ -20,10 +20,15 @@ import html2canvas from "html2canvas";
 
 import "./App.css";
 
-// Attach JWT automatically
+// Base URL (also respects VITE_API_BASE_URL if you ever set it)
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+
+// Add axios interceptor globally
 axios.interceptors.request.use((config) => {
-  const t = localStorage.getItem("token");
-  if (t) config.headers.Authorization = `Bearer ${t}`;
+  const storedToken = localStorage.getItem("token");
+  if (storedToken) {
+    config.headers.Authorization = `Bearer ${storedToken}`;
+  }
   return config;
 });
 
@@ -69,11 +74,15 @@ function App() {
   };
 
   const loadDash = async () => {
-    if (!token) { setStats(null); setHistory([]); return; }
+    if (!token) {
+      setStats(null);
+      setHistory([]);
+      return;
+    }
     try {
       const [s, h] = await Promise.all([
-        axios.get("http://127.0.0.1:8000/stats"),
-        axios.get("http://127.0.0.1:8000/history?limit=50"),
+        axios.get(`${API_BASE}/stats`),
+        axios.get(`${API_BASE}/history?limit=50`),
       ]);
       setStats(s.data);
       setHistory(h.data);
@@ -82,13 +91,14 @@ function App() {
     }
   };
 
-  useEffect(() => { loadDash(); }, [token]);
+  useEffect(() => {
+    loadDash();
+  }, [token]);
 
-  // ----- Dashboard numbers (live if signed in, fallback to demo) -----
-  const demo = { total: 123, avg: 42.7, high: 8 };
-  const totalScans = stats?.total_scans ?? demo.total;
-  const avgRiskScore = stats?.avg_risk ?? demo.avg;
-  const highRiskFiles = stats?.high_risk ?? demo.high;
+  // ----- Dashboard numbers (live if signed in, fallback to zero) -----
+  const totalScans = stats?.total_scans ?? 0;
+  const avgRiskScore = stats?.avg_risk ?? 0;
+  const highRiskFiles = stats?.high_risk ?? 0;
 
   // map server ext -> friendly label + color
   const _extLabel = (ext) => {
@@ -110,13 +120,13 @@ function App() {
     { ext: ".zip", count: 20 },
     { ext: ".docx", count: 15 },
     { ext: ".other", count: 40 },
-  ]).map(t => {
+  ]).map((t) => {
     const label = _extLabel(t.ext);
     return { name: label, value: t.count, color: _colorFor(label) };
   });
 
   const scanHistoryData = (() => {
-    const times = stats?.times ?? Array.from({length:10}, (_,i)=>i+1); // demo ticks
+    const times = stats?.times ?? Array.from({ length: 10 }, (_, i) => i + 1); // demo ticks
     // Simple cumulative trend: 1..N
     return times.map((_, idx) => ({ time: idx + 1, scans: idx + 1 }));
   })();
@@ -131,6 +141,10 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState("");
   const [analysis, setAnalysis] = useState(null); // becomes object after upload
+  const [urlInput, setUrlInput] = useState("");
+  const [urlLoading, setUrlLoading] = useState(false);
+  const [urlError, setUrlError] = useState("");
+  const [urlResult, setUrlResult] = useState(null);
   const hiddenFileInputRef = useRef(null);
   const analysisRef = useRef(null); // for PDF export
 
@@ -182,7 +196,7 @@ function App() {
   const buildTimelineData = (timeline, limit = 30) => {
     if (!Array.isArray(timeline)) return [];
     const filtered = timeline
-      .filter(t => Number.isFinite(t?.mtime))
+      .filter((t) => Number.isFinite(t?.mtime))
       .sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
       .slice(0, limit);
     return filtered.map((t, idx) => ({
@@ -191,6 +205,13 @@ function App() {
       sizeKB: Math.max(0, (t.size || 0) / 1024),
       label: getBaseName(t.path),
     }));
+  };
+
+  const urlRiskColor = (score) => {
+    if (!Number.isFinite(score)) return "badge-low";
+    if (score <= 40) return "badge-low";
+    if (score <= 70) return "badge-medium";
+    return "badge-high";
   };
 
   const handleCopy = async (text) => {
@@ -213,7 +234,7 @@ function App() {
     try {
       setUploading(true);
       setToast("");
-      const response = await axios.post("http://127.0.0.1:8000/analyze", formData, {
+      const response = await axios.post(`${API_BASE}/analyze`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
@@ -240,6 +261,32 @@ function App() {
     }
   };
 
+  const handleUrlScan = async () => {
+    setUrlError("");
+    setUrlResult(null);
+
+    let candidate = urlInput.trim();
+    if (!candidate) {
+      setUrlError("Please enter a URL to analyze.");
+      return;
+    }
+    if (!candidate.startsWith("http://") && !candidate.startsWith("https://")) {
+      candidate = `https://${candidate}`;
+    }
+
+    try {
+      setUrlLoading(true);
+      const res = await axios.post(`${API_BASE}/api/url/analyze`, { url: candidate });
+      setUrlResult(res.data);
+    } catch (err) {
+      setUrlError(
+        err?.response?.data?.detail || "Failed to analyze URL. Please try again."
+      );
+    } finally {
+      setUrlLoading(false);
+    }
+  };
+
   // ----- Export PDF (captures only the analysis panel) -----
   const exportPDF = async () => {
     if (!analysisRef.current) return;
@@ -261,7 +308,9 @@ function App() {
     } else {
       // naive multipage slicing
       let y = 0;
-      const sliceHeight = Math.floor((canvas.width * (pageHeight - 20)) / imgWidth);
+      const sliceHeight = Math.floor(
+        (canvas.width * (pageHeight - 20)) / imgWidth
+      );
       while (y < canvas.height) {
         const pageCanvas = document.createElement("canvas");
         pageCanvas.width = canvas.width;
@@ -269,8 +318,14 @@ function App() {
         const ctx = pageCanvas.getContext("2d");
         ctx.drawImage(
           canvas,
-          0, y, canvas.width, pageCanvas.height,
-          0, 0, canvas.width, pageCanvas.height
+          0,
+          y,
+          canvas.width,
+          pageCanvas.height,
+          0,
+          0,
+          canvas.width,
+          pageCanvas.height
         );
         const pageImg = pageCanvas.toDataURL("image/png");
         if (y > 0) pdf.addPage();
@@ -280,7 +335,10 @@ function App() {
       }
     }
 
-    const safeName = (analysis?.originalFilename || "dfir-analysis").replace(/[^\w.-]+/g, "_");
+    const safeName = (analysis?.originalFilename || "dfir-analysis").replace(
+      /[^\w.-]+/g,
+      "_"
+    );
     pdf.save(`${safeName}.pdf`);
   };
 
@@ -297,10 +355,13 @@ function App() {
   const exportCSV = async () => {
     if (!analysis?.sha256) return;
     try {
-      const res = await fetch(`http://127.0.0.1:8000/export/csv?sha256=${analysis.sha256}`);
+      const res = await fetch(`${API_BASE}/export/csv?sha256=${analysis.sha256}`);
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
-      const safe = (analysis.originalFilename || "dfir-analysis").replace(/[^\w.-]+/g, "_");
+      const safe = (analysis.originalFilename || "dfir-analysis").replace(
+        /[^\w.-]+/g,
+        "_"
+      );
       downloadBlob(`${safe}.csv`, blob);
       setToast("CSV exported");
     } catch (e) {
@@ -311,10 +372,15 @@ function App() {
   const exportJSON = async () => {
     if (!analysis?.sha256) return;
     try {
-      const res = await fetch(`http://127.0.0.1:8000/export/json?sha256=${analysis.sha256}`);
+      const res = await fetch(
+        `${API_BASE}/export/json?sha256=${analysis.sha256}`
+      );
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
-      const safe = (analysis.originalFilename || "dfir-analysis").replace(/[^\w.-]+/g, "_");
+      const safe = (analysis.originalFilename || "dfir-analysis").replace(
+        /[^\w.-]+/g,
+        "_"
+      );
       downloadBlob(`${safe}.json`, blob);
       setToast("JSON exported");
     } catch (e) {
@@ -324,18 +390,17 @@ function App() {
 
   return (
     <div className="app app-wide">
-    
-  
-
       {/* Top bar */}
-      {location.pathname !== "/" && <Header
-        name={name}
-        token={token}
-        menuOpen={menuOpen}
-        setMenuOpen={setMenuOpen}
-        avatarRef={avatarRef}
-        logout={logout}
-      />}
+      {location.pathname !== "/" && (
+        <Header
+          name={name}
+          token={token}
+          menuOpen={menuOpen}
+          setMenuOpen={setMenuOpen}
+          avatarRef={avatarRef}
+          logout={logout}
+        />
+      )}
 
       {/* ===== Header Row: KPIs (left) + Upload (right) ===== */}
       <div className="header-row">
@@ -407,7 +472,7 @@ function App() {
 
       {/* ===== Main: two columns ===== */}
       <div className="dashboard-grid two-col">
-        {/* LEFT: charts (keep your two cards here) */}
+        {/* LEFT: charts + URL scanner */}
         <div className="dashboard-left">
           <div className="chart-grid">
             <div className="card">
@@ -494,8 +559,73 @@ function App() {
               </div>
             </div>
           </div>
+
+          {/* URL Quick Check Widget (below charts) */}
+          <div className="card" style={{ marginTop: "1.5rem" }}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="card-title">URL Quick Check</div>
+              <button
+                onClick={() => navigate("/dashboard/url-analysis")}
+                className="text-purple-400 hover:text-purple-300 text-sm font-semibold flex items-center gap-1"
+              >
+                Full Analysis →
+              </button>
+            </div>
+
+            <div className="url-form">
+              <input
+                type="url"
+                placeholder="https://example.com/link"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                className="url-input"
+              />
+              <button
+                onClick={handleUrlScan}
+                className={`upload-btn ${urlLoading ? "loading" : ""}`}
+                disabled={urlLoading}
+              >
+                {urlLoading ? "Checking..." : "Quick Check"}
+              </button>
+            </div>
+
+            {urlError && <div className="toast toast-error">{urlError}</div>}
+
+            {!urlResult && !urlError && !urlLoading && (
+              <div className="panel-placeholder" style={{ marginTop: ".75rem" }}>
+                Quick URL safety check.{" "}
+                <span
+                  className="text-purple-400 cursor-pointer hover:underline"
+                  onClick={() => navigate("/dashboard/url-analysis")}
+                >
+                  Go to full analyzer
+                </span>
+              </div>
+            )}
+
+            {urlResult && (
+              <div className="url-result">
+                <div className="url-risk-row">
+                  <span className="result-label">Risk Score</span>
+                  <span className={`badge ${urlRiskColor(urlResult.risk_score)}`}>
+                    {urlResult.risk_score} / 100
+                  </span>
+                </div>
+                <div className="text-sm text-gray-400 mt-2">
+                  {urlResult.category} Risk - {urlResult.signals?.length || 0} threats detected
+                </div>
+                <button
+                  onClick={() => navigate("/dashboard/url-analysis", { state: { url: urlInput } })}
+                  className="mt-3 text-purple-400 hover:text-purple-300 text-sm font-semibold"
+                >
+                  View Detailed Analysis →
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
+        {/* RIGHT: analysis + recommendations (unchanged) */}
         <aside className="right-panel">
           {/* ACTION BAR: always visible; disabled before upload */}
           {(() => {
@@ -586,7 +716,9 @@ function App() {
               >
                 <span className="result-label">SHA256</span>
                 <span className="hash-field">
-                  <span className="code-select">{analysis?.sha256 || "-"}</span>
+                  <span className="code-select">
+                    {analysis?.sha256 || "-"}
+                  </span>
                   <button
                     className="copy-btn"
                     onClick={() => analysis && handleCopy(analysis.sha256)}
@@ -681,7 +813,7 @@ function App() {
                         labelFormatter={(idx) => {
                           const d = buildTimelineData(analysis.timeline)[idx];
                           return d
-                            ? `${d.label} � ${formatDateTime(d.mtime)}`
+                            ? `${d.label} · ${formatDateTime(d.mtime)}`
                             : "";
                         }}
                         contentStyle={{
@@ -720,4 +852,3 @@ function App() {
 }
 
 export default App;
-

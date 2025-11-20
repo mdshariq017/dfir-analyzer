@@ -57,7 +57,11 @@ def login(body: LoginIn):
     if not user or not hasher.verify(body.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     name = user.get("name") or "User"
-    return {"access_token": _issue_token(user["email"], name), "name": name}
+    # Create JWT with simplified payload
+    payload = {"sub": user["email"], "iat": int(time.time())}
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+    access_token = token if isinstance(token, str) else token.decode("utf-8")
+    return {"access_token": access_token, "name": name}
 
 @router.get("/me")
 def me(request: Request):

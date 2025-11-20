@@ -19,6 +19,7 @@ export default function Login() {
       });
       localStorage.setItem("token", data.access_token);
       localStorage.setItem("name", data.name || email);
+      axios.defaults.headers.common["Authorization"] = `Bearer ${data.access_token}`;
       nav("/dashboard");
     } catch (err) {
       setMsg(err.response?.data?.detail || "Login failed");

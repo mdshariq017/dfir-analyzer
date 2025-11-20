@@ -6,6 +6,7 @@ import "./index.css";
 import App from "./App.jsx"; // dashboard
 import Login from "./Login.jsx";
 import Signup from "./Signup.jsx";
+import URLAnalysis from "./URLAnalysis.jsx";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
@@ -20,6 +21,9 @@ createRoot(document.getElementById("root")).render(
 
         {/* Guest/demo dashboard */}
         <Route path="/guest" element={<App />} />
+
+        {/* URL Analysis */}
+        <Route path="/dashboard/url-analysis" element={<URLAnalysis />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>
